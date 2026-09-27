@@ -1,0 +1,116 @@
+# Render infrastructure for the admin API.
+#
+# NO SECRET VALUES ARE IN THIS FILE, and none may be added. Everything sensitive
+# is declared with `sync: false`, which tells Render "this variable exists, ask
+# the operator for it in the dashboard" — the value is never stored in git.
+#
+# Only the API is deployed here. The public site and the admin bundle are static
+# and go to Vercel; see vercel.json and docs/DEPLOYMENT.md.
+
+services:
+  - type: web
+    name: mj-portfolio-api
+    runtime: python
+    # Persistent disk support requires a paid instance. See the `disk` note
+    # below before changing this.
+    plan: starter
+    region: singapore
+
+    # `pip install .` reads pyproject.toml, which is the single dependency
+    # declaration. There is deliberately no requirements.txt to drift from it.
+    buildCommand: pip install --upgrade pip && pip install .
+
+    # Bind 0.0.0.0 and take the port from Render. Never hard-code 8000 here —
+    # Render assigns $PORT and health checks the port it assigned.
+    #
+    # --proxy-headers with --forwarded-allow-ips '*' is correct HERE and only
+    # here: the service is reachable only through Render's proxy, so the
+    # X-Forwarded-* headers arriving at uvicorn come from it. The application
+    # then reads the client address according to TRUSTED_PROXY_COUNT, taking the
+    # entry the proxy appended rather than the one the client sent.
+    startCommand: >-
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port $PORT
+      --proxy-headers
+      --forwarded-allow-ips '*'
+
+    # Reuses the application's own endpoint. It performs a real database round
+    # trip, which is deliberate — a health check that skips the database reports
+    # healthy while every request fails.
+    #
+    # Consequence to know about: a cold Neon connection was measured at ~3.2 s
+    # from the audit environment, so allow a generous health-check timeout or
+    # the first check after a cold start can fail the deploy.
+    healthCheckPath: /api/health
+
+    # Migrations are NOT run automatically. The documented order backs the
+    # database up first, and skipping that to save a step is how a bad deploy
+    # becomes an unrecoverable one. See docs/DEPLOYMENT.md §"Database migrations".
+    # preDeployCommand: alembic upgrade head
+
+    # Uploaded media. Without a persistent disk, Render's filesystem resets on
+    # every deploy and restart: the media library keeps its database rows and
+    # loses every file behind them. STORAGE_ROOT below must point inside this
+    # mount.
+    #
+    # A disk pins the service to a single instance and blocks zero-downtime
+    # deploys. That is an acceptable trade for a single-operator CMS; the
+    # alternative is object storage, which is a larger change than this phase.
+    disk:
+      name: media
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      # --- safe, non-secret configuration -------------------------------
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      # One proxy in front: Render's. This is what makes per-IP rate limiting
+      # work; left at 0, every visitor shares the proxy's address.
+      - key: TRUSTED_PROXY_COUNT
+        value: "1"
+      - key: STORAGE_ROOT
+        value: /var/data/storage
+      - key: PYTHON_VERSION
+        # Mirrors backend/.python-version, for Render builds that read the
+        # environment variable instead of the file.
+        value: "3.13"
+
+      # --- operator-supplied, entered in the Render dashboard ------------
+      # `sync: false` means Render prompts for the value and keeps it out of git.
+
+      # Neon connection string. Must include sslmode=require.
+      # ROTATE THIS BEFORE FIRST DEPLOY — see docs/DEPLOYMENT.md.
+      - key: DATABASE_URL
+        sync: false
+
+      # Signing key for short-lived pending-2FA tokens. Generate a fresh one:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: SECRET_KEY
+        sync: false
+
+      # The browser origins allowed to call this API with credentials. The
+      # production site and, if it is on a separate host, the admin. https only;
+      # the application refuses to start on a wildcard or a localhost origin.
+      - key: CORS_ORIGINS
+        sync: false
+
+      # This service's own hostname(s). Starts as <service>.onrender.com and
+      # gains the custom API domain once DNS is set up.
+      - key: ALLOWED_HOSTS
+        sync: false
+
+      # `lax` unless the admin and this API are on different registrable
+      # domains, in which case `none` is required. Prefer a shared parent domain
+      # and leave this alone.
+      - key: SESSION_COOKIE_SAMESITE
+        value: lax
+
+      # Vercel deploy hook, fired after a successful publish or rollback.
+      # A bearer credential: anyone holding it can trigger builds. Optional —
+      # publishing still records the snapshot without it.
+      - key: DEPLOY_HOOK_URL
+        sync: false

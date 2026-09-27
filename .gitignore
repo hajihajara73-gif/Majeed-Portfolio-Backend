@@ -22,3 +22,25 @@ storage/
 .env
 .env.*
 !.env.example
+
+# --- carried over from the monorepo root ignore file, which this repository no
+# --- longer inherits. Do not drop these.
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor and OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.sw?
+
+# Database dumps. Backups belong outside the repository entirely, but a mistyped
+# --file should not become a commit.
+*.dump
+*.sql.gz
