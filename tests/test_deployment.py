@@ -8,6 +8,8 @@ these behaviours is untested until it is wrong in production.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -143,21 +145,30 @@ def test_production_accepts_a_full_deployment_configuration() -> None:
 def test_paths_default_to_the_repository_layout() -> None:
     """
     Development keeps working with no configuration at all, and the defaults
-    match the `backend/` + `frontend/` sibling layout.
+    describe a frontend checked out beside the backend.
 
-    Asserted by name rather than by counting parents, because counting parents is
-    exactly what broke when the directories were reorganised.
+    Deliberately asserts RELATIONSHIPS, not directory names. An earlier version
+    checked `backend_root.name == "backend"` and failed in every checkout that
+    was not called exactly that — which is every clone from GitHub, where the
+    directory takes the repository's name.
     """
+    import app.core.config as config_module
+
     development = Settings(
         environment="development",
         database_url="postgresql+psycopg://u:p@h/db",
         secret_key="x" * 40,
     )
 
-    assert development.backend_root.name == "backend"
+    # The backend root is whatever directory contains the `app` package.
+    assert (development.backend_root / "app" / "core" / "config.py").is_file()
+    assert development.backend_root == Path(config_module.__file__).resolve().parents[2]
+
     assert development.resolved_storage_root == development.backend_root / "storage"
 
     frontend = development.resolved_frontend_root
+    # `frontend` IS a fixed default name in the code, unlike the backend's own
+    # directory, so this one is fair to assert.
     assert frontend.name == "frontend"
     assert frontend.parent == development.backend_root.parent
     assert development.frontend_public_root == frontend / "public"
