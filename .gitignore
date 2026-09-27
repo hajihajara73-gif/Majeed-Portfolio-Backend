@@ -1,0 +1,24 @@
+# Backend (Render) generated files. Paths are relative to `backend/`.
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+# `pip install .` leaves this behind.
+build/
+coverage/
+.coverage
+htmlcov/
+
+# Uploaded media. Never in git: these are user files, and in production they live
+# on a persistent volume outside the checkout entirely (STORAGE_ROOT).
+storage/
+
+# Environment. Only the template is tracked.
+.env
+.env.*
+!.env.example
