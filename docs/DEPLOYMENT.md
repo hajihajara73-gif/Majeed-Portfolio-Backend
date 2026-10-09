@@ -91,7 +91,7 @@ Render can read it as a Blueprint; otherwise enter these by hand:
 | Setting | Value |
 | --- | --- |
 | Type | Web Service |
-| Repository | `majeed74905/Majeed-Portfolio-Backend` |
+| Repository | `hajihajara73-gif/Majeed-Portfolio-Backend` |
 | Branch | `main` |
 | Root directory | *(leave blank — the app is at the repo root)* |
 | Runtime | Python 3 |

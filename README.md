@@ -4,7 +4,7 @@ The admin CMS API. FastAPI + SQLAlchemy + Alembic, on **Neon PostgreSQL**.
 Deploys to **Render**.
 
 The public site and admin panel live in a separate repository:
-**[Majeed-Portfolio-Frontend](https://github.com/majeed74905/Majeed-Portfolio-Frontend)**
+**[Majeed-Portfolio-Frontend](https://github.com/hajihajara73-gif/Majeed-Portfolio-Frontend)**
 (React + Vite, deploys to Vercel).
 
 ```
