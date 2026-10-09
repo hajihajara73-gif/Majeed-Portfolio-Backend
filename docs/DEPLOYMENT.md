@@ -28,6 +28,18 @@ appears. The apex layout keeps the site and the API on the same registrable
 domain, which is what lets the admin session cookie stay on `SameSite=Lax`
 (§9); do not split them across different domains.
 
+**The Render service is already live** at
+`https://majeed-portfolio-backend.onrender.com`. That hostname works now and
+should stay in `ALLOWED_HOSTS` alongside the custom one, so the service keeps
+answering through the DNS cutover.
+
+Do **not** point the admin at it, though. `VITE_API_BASE_URL` must be
+`https://api.DOMAIN`: the session cookie is `SameSite=Lax` and a browser sends
+it only within one registrable domain, so a site on `DOMAIN` calling
+`onrender.com` produces a login that appears to work and a `401` on everything
+after it, with blank media thumbnails. The contact form is unaffected — it
+sends no cookie — so `VITE_CONTACT_ENDPOINT` may use either host.
+
 Two consequences of the free tier, accepted knowingly:
 
 - **Uploaded media does not survive a deploy.** Render's filesystem resets. The
@@ -91,7 +103,7 @@ Render can read it as a Blueprint; otherwise enter these by hand:
 | Setting | Value |
 | --- | --- |
 | Type | Web Service |
-| Repository | `hajihajara73-gif/Majeed-Portfolio-Backend` |
+| Repository | `majeed74905/Majeed-Portfolio-Backend` |
 | Branch | `main` |
 | Root directory | *(leave blank — the app is at the repo root)* |
 | Runtime | Python 3 |
@@ -115,12 +127,12 @@ enter:
 | `DATABASE_URL` | the **rotated** Neon string, including `?sslmode=require` |
 | `SECRET_KEY` | a fresh value — `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `CORS_ORIGINS` | `https://DOMAIN` |
-| `ALLOWED_HOSTS` | `mj-portfolio-api.onrender.com,api.DOMAIN` |
+| `ALLOWED_HOSTS` | `majeed-portfolio-backend.onrender.com,api.DOMAIN` |
 | `DEPLOY_HOOK_URL` | leave empty for now — see step 8 |
 
 `ALLOWED_HOSTS` lists **both** the Render hostname and your custom one, so the
 service keeps working before and after DNS moves. Use the real service hostname
-Render assigns; it may differ from `mj-portfolio-api` if that name is taken.
+Render assigned `majeed-portfolio-backend`.
 
 **The service will refuse to start if any of this is wrong** — empty or localhost
 `CORS_ORIGINS`/`ALLOWED_HOSTS`, a wildcard, plain `http`, `DEBUG=true`,
@@ -131,9 +143,10 @@ from a browser console weeks later.
 Verify before continuing:
 
 ```bash
-curl https://mj-portfolio-api.onrender.com/api/health     # {"status":"ok"}
-curl -H "Host: evil.invalid" https://mj-portfolio-api.onrender.com/api/health   # 400
-curl https://mj-portfolio-api.onrender.com/docs           # 404 — docs are off in production
+curl https://majeed-portfolio-backend.onrender.com/              # welcome message
+curl https://majeed-portfolio-backend.onrender.com/api/health    # {"status":"ok"}
+curl https://majeed-portfolio-backend.onrender.com/docs          # 404 — only once ENVIRONMENT=production
+curl -H "Host: evil.invalid" https://majeed-portfolio-backend.onrender.com/api/health   # 400
 ```
 
 ### 5. Add the API's custom domain on Render
