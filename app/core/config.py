@@ -213,10 +213,12 @@ class Settings(BaseSettings):
             )
         if self.storage_root is None:
             problems.append(
-                "STORAGE_ROOT is not set. The default path is inside the "
-                "application directory, which on Render is ephemeral — uploaded "
-                "media would be lost on every deploy. Point it at a persistent "
-                "disk."
+                "STORAGE_ROOT is not set. Point it at a persistent volume if "
+                "uploaded media must survive a deploy, or at a path on the "
+                "ephemeral filesystem if losing it is acceptable — but say "
+                "which. The default is an unmarked path inside the application "
+                "directory, and on a platform like Render that silently "
+                "discards every upload."
             )
 
         if problems:

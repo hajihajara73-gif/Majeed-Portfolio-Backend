@@ -11,9 +11,19 @@ services:
   - type: web
     name: mj-portfolio-api
     runtime: python
-    # Persistent disk support requires a paid instance. See the `disk` note
-    # below before changing this.
-    plan: starter
+    # Free tier, chosen deliberately. Two consequences, both accepted:
+    #
+    #   1. No persistent disk — see the STORAGE_ROOT note below. Anything
+    #      uploaded through the admin media library is lost on every deploy and
+    #      restart. The public site is unaffected: every asset it uses is
+    #      committed in the frontend repository.
+    #   2. The service spins down when idle and takes tens of seconds to wake.
+    #      The first contact-form submission after an idle period is slow, and
+    #      the form shows "Sending…" for the whole wait. It does not fail.
+    #
+    # Moving to `starter` and re-adding a `disk:` block mounted at /var/data is
+    # the upgrade path; nothing else needs to change.
+    plan: free
     region: singapore
 
     # `pip install .` reads pyproject.toml, which is the single dependency
@@ -49,18 +59,15 @@ services:
     # becomes an unrecoverable one. See docs/DEPLOYMENT.md §"Database migrations".
     # preDeployCommand: alembic upgrade head
 
-    # Uploaded media. Without a persistent disk, Render's filesystem resets on
-    # every deploy and restart: the media library keeps its database rows and
-    # loses every file behind them. STORAGE_ROOT below must point inside this
-    # mount.
+    # No `disk:` block — the free tier does not support one. To add persistent
+    # media later, move to a paid plan and restore:
     #
-    # A disk pins the service to a single instance and blocks zero-downtime
-    # deploys. That is an acceptable trade for a single-operator CMS; the
-    # alternative is object storage, which is a larger change than this phase.
-    disk:
-      name: media
-      mountPath: /var/data
-      sizeGB: 1
+    #   disk:
+    #     name: media
+    #     mountPath: /var/data
+    #     sizeGB: 1
+    #
+    # then point STORAGE_ROOT at /var/data/storage.
 
     envVars:
       # --- safe, non-secret configuration -------------------------------
@@ -72,8 +79,17 @@ services:
       # work; left at 0, every visitor shares the proxy's address.
       - key: TRUSTED_PROXY_COUNT
         value: "1"
+      # Where uploaded media is written. On the free tier this is an ordinary
+      # directory inside the ephemeral checkout, so it does not survive a deploy
+      # — that is the accepted trade, not an oversight. It is still set
+      # explicitly, because the application refuses to start in production
+      # without it: the point of the check is that the location is a decision
+      # somebody made, not a default nobody noticed.
+      #
+      # With a paid plan and a disk mounted at /var/data, change this to
+      # /var/data/storage and uploads persist.
       - key: STORAGE_ROOT
-        value: /var/data/storage
+        value: /opt/render/project/src/storage
       - key: PYTHON_VERSION
         # Mirrors backend/.python-version, for Render builds that read the
         # environment variable instead of the file.

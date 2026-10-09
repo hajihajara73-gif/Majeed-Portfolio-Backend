@@ -8,6 +8,237 @@ No domain is assumed anywhere. Every host-specific value is an environment
 variable, and the applications **refuse to start or degrade honestly** when one
 is missing rather than guessing.
 
+**Start at §0 — it is the ordered runbook for this specific deployment.** The
+numbered sections after it are the reference material behind each step.
+
+---
+
+## 0. Runbook — the actual deployment
+
+The chosen shape, from the decisions taken on 2026-10-09:
+
+| | Where | Host |
+| --- | --- | --- |
+| Public site + admin | Vercel | `DOMAIN` (apex) |
+| API | Render, **free tier, no disk** | `api.DOMAIN` |
+| Database | Neon | — |
+
+Throughout, **`DOMAIN` means your `.me` domain** — substitute it everywhere it
+appears. The apex layout keeps the site and the API on the same registrable
+domain, which is what lets the admin session cookie stay on `SameSite=Lax`
+(§9); do not split them across different domains.
+
+Two consequences of the free tier, accepted knowingly:
+
+- **Uploaded media does not survive a deploy.** Render's filesystem resets. The
+  public site is unaffected — every asset it uses is committed in the frontend
+  repository — but anything added through the admin media library afterwards is
+  lost on the next deploy. Upgrading to a paid plan with a disk at `/var/data`
+  and setting `STORAGE_ROOT=/var/data/storage` is the only change needed later.
+- **The service sleeps when idle** and takes tens of seconds to wake. The first
+  contact-form submission after a quiet period is slow; the form shows
+  "Sending…" for the whole wait and then succeeds. It does not fail or lie.
+
+### Order matters
+
+Do these in sequence. Steps 1–3 are security actions and come before anything is
+reachable; step 5 must happen before step 6, because the admin's API origin is
+compiled into the bundle at build time.
+
+---
+
+### 1. Rotate the credentials that have been exposed
+
+Both were pasted into a chat transcript. Treat both as compromised.
+
+```bash
+# Admin password
+cd backend
+python -m app.cli reset-password      # prompts; no echo; revokes every session
+```
+
+**Neon:** reset the role's password in the Neon console. You will paste the new
+connection string into Render in step 4 — not into any file in git.
+
+**GitHub:** the personal access token used to push is also in that transcript.
+Revoke it at <https://github.com/settings/tokens>.
+
+### 2. Enable two-factor authentication
+
+```bash
+cd backend
+python -m app.cli enable-2fa
+```
+
+Store the ten recovery codes somewhere reachable without your phone — they are
+shown exactly once. Do this before the admin is reachable from the internet.
+
+### 3. Confirm the database is migrated
+
+```bash
+cd backend
+python -m alembic current     # expect 0003_totp_hardening (head)
+python -m alembic check       # expect "No new upgrade operations detected"
+```
+
+Nothing else is needed — Neon already holds the schema and content.
+
+### 4. Create the Render service
+
+From the **Majeed-Portfolio-Backend** repository. `render.yaml` is at its root, so
+Render can read it as a Blueprint; otherwise enter these by hand:
+
+| Setting | Value |
+| --- | --- |
+| Type | Web Service |
+| Repository | `majeed74905/Majeed-Portfolio-Backend` |
+| Branch | `main` |
+| Root directory | *(leave blank — the app is at the repo root)* |
+| Runtime | Python 3 |
+| Build command | `pip install --upgrade pip && pip install .` |
+| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'` |
+| Health check path | `/api/health` |
+| Plan | Free |
+| Region | Singapore *(nearest of Render's options to both you and a future `ap-south-1` Neon project)* |
+
+Environment variables — the first five are already in `render.yaml`; the rest you
+enter:
+
+| Variable | Value |
+| --- | --- |
+| `ENVIRONMENT` | `production` |
+| `DEBUG` | `false` |
+| `TRUSTED_PROXY_COUNT` | `1` |
+| `STORAGE_ROOT` | `/opt/render/project/src/storage` |
+| `PYTHON_VERSION` | `3.13` |
+| `SESSION_COOKIE_SAMESITE` | `lax` |
+| `DATABASE_URL` | the **rotated** Neon string, including `?sslmode=require` |
+| `SECRET_KEY` | a fresh value — `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `CORS_ORIGINS` | `https://DOMAIN` |
+| `ALLOWED_HOSTS` | `mj-portfolio-api.onrender.com,api.DOMAIN` |
+| `DEPLOY_HOOK_URL` | leave empty for now — see step 8 |
+
+`ALLOWED_HOSTS` lists **both** the Render hostname and your custom one, so the
+service keeps working before and after DNS moves. Use the real service hostname
+Render assigns; it may differ from `mj-portfolio-api` if that name is taken.
+
+**The service will refuse to start if any of this is wrong** — empty or localhost
+`CORS_ORIGINS`/`ALLOWED_HOSTS`, a wildcard, plain `http`, `DEBUG=true`,
+`TRUSTED_PROXY_COUNT=0`, or an unset `STORAGE_ROOT`. The logs name every problem
+at once. That is deliberate: each of those is silent at boot and only visible
+from a browser console weeks later.
+
+Verify before continuing:
+
+```bash
+curl https://mj-portfolio-api.onrender.com/api/health     # {"status":"ok"}
+curl -H "Host: evil.invalid" https://mj-portfolio-api.onrender.com/api/health   # 400
+curl https://mj-portfolio-api.onrender.com/docs           # 404 — docs are off in production
+```
+
+### 5. Add the API's custom domain on Render
+
+In the service's **Settings → Custom Domains**, add `api.DOMAIN`. Render shows
+the CNAME target to use. Do the DNS in step 7.
+
+### 6. Create the Vercel project
+
+From the **Majeed-Portfolio-Frontend** repository.
+
+| Setting | Value |
+| --- | --- |
+| Framework preset | Vite |
+| Root directory | *(leave blank — the app is at the repo root)* |
+| Build command | `npm run build:all` |
+| Output directory | `dist` |
+| Install command | *(default)* |
+
+Environment variables, for **Production**. All three are compiled into the
+browser bundle and are public — never put a credential in a `VITE_` variable:
+
+| Variable | Value |
+| --- | --- |
+| `VITE_SITE_URL` | `https://DOMAIN` |
+| `VITE_CONTACT_ENDPOINT` | `https://api.DOMAIN/api/public/contact` |
+| `VITE_API_BASE_URL` | `https://api.DOMAIN` |
+
+**Set these before the first build you intend to keep.** They are read at build
+time, not at runtime: `VITE_API_BASE_URL` is baked into the admin bundle and into
+its Content-Security-Policy, and `VITE_SITE_URL` decides whether a canonical
+link, `og:url` and `sitemap.xml` are emitted at all. A build made without them
+produces a site whose admin cannot reach the API and whose sitemap does not
+exist. Redeploy after setting them.
+
+Then **Settings → Domains**: add `DOMAIN` and `www.DOMAIN`, with `www`
+redirecting to the apex.
+
+### 7. DNS at Namecheap
+
+**Domain List → Manage → Advanced DNS.** Remove Namecheap's default parking
+records (the `CNAME` for `www` pointing at `parkingpage`, and any URL-redirect
+record), then add:
+
+| Type | Host | Value | TTL |
+| --- | --- | --- | --- |
+| `A` | `@` | the apex IP Vercel shows you | Automatic |
+| `CNAME` | `www` | the target Vercel shows you | Automatic |
+| `CNAME` | `api` | the target Render shows you | Automatic |
+
+Take the right-hand values from each dashboard rather than from any guide —
+they change, and a stale one silently fails verification.
+
+`.me` is a normal gTLD here; nothing registry-specific applies. Propagation is
+usually minutes. Both Vercel and Render issue TLS certificates automatically once
+the records resolve.
+
+Check:
+
+```bash
+nslookup DOMAIN
+nslookup api.DOMAIN
+curl -I https://DOMAIN            # 200, and the security headers from §10
+curl https://api.DOMAIN/api/health
+```
+
+### 8. Decide on the deploy hook
+
+Optional, and reasonable to leave unset. **It does not publish content** — see
+§15. Publishing records a snapshot in the database; the live site is built from
+the committed export, so the sequence that actually ships content is:
+
+```bash
+# in the admin: Preview → Publish
+cd backend && FRONTEND_ROOT=/path/to/Majeed-Portfolio-Frontend python -m app.export
+cd /path/to/Majeed-Portfolio-Frontend
+git add -A && git commit -m "content: publish" && git push   # Vercel builds on push
+```
+
+A hook is for redeploying the *current* content — after changing a Vercel
+environment variable, say. If you want one: **Vercel → Project → Settings → Git →
+Deploy Hooks**, create one on `main`, and put the URL in `DEPLOY_HOOK_URL` on
+Render. Treat it as a password; anyone holding it can trigger unlimited builds.
+
+### 9. Smoke test what is live
+
+Run the "After deployment" table in §19. The ones that catch real breakage:
+
+```bash
+curl -I https://DOMAIN | grep -i content-security-policy    # present
+curl https://api.DOMAIN/api/admin/projects                  # 401
+curl -H "Host: evil.invalid" https://api.DOMAIN/api/health  # 400
+```
+
+Then in a browser: the site at `https://DOMAIN` with a silent console, the
+contact form end to end, `https://DOMAIN/admin/` sign-in with 2FA, and a media
+thumbnail loading in the admin — that last one proves the session cookie is
+crossing to `api.DOMAIN`, which is the thing the apex layout exists to make work.
+
+### 10. Still outstanding after all this
+
+Content, not infrastructure: 33 `TODO_REPLACE_*` fields, the placeholder audio
+track, and the résumé PDF. §21 item 11. Unfilled fields render as nothing, so
+sections can look finished while being empty.
+
 ---
 
 ## 1. Architecture
@@ -166,7 +397,7 @@ tells Render to ask for the value and keep it out of git.
 | Build command | `pip install --upgrade pip && pip install .` |
 | Start command | see below |
 | Health check path | `/api/health` |
-| Persistent disk | 1 GB at `/var/data` — see §4 |
+| Persistent disk | **none** — free tier. Uploaded media is ephemeral; see §4 |
 
 ### Start command
 
@@ -219,31 +450,52 @@ audit months later, so failing on startup is the cheapest place to catch them.
 
 ---
 
-## 4. Uploaded media needs a persistent disk
+## 4. Uploaded media and the ephemeral filesystem
 
 **Render's filesystem is ephemeral.** Every deploy and every restart begins from
 the build image, so anything written to the application directory is gone.
 
-Uploads currently live in `backend/storage/` (56 files locally). Without a
-disk, after the first redeploy the media library keeps all of its database rows
-and loses every file behind them: thumbnails 404, and `python -m app.export`
-reports missing media.
+Uploads live in `backend/storage/` (56 files locally), or wherever
+`STORAGE_ROOT` points.
 
-`render.yaml` therefore mounts a 1 GB disk at `/var/data` and sets
-`STORAGE_ROOT=/var/data/storage`. Consequences to accept knowingly:
+### The free tier, which is what this deployment uses
 
-- A disk requires a paid instance type.
-- It pins the service to **one instance** and rules out zero-downtime deploys.
-  Acceptable for a single-operator CMS; the alternative is object storage, which
-  is a larger change than this phase.
+No persistent disk is available, so `STORAGE_ROOT` is an ordinary path inside
+the checkout and **uploads do not survive a deploy**. After one, the media
+library keeps all of its database rows and loses the files behind them:
+thumbnails 401/404 in the admin, and `python -m app.export` reports missing
+media and exits non-zero.
+
+This is a knowing trade, not an oversight, and it is survivable because of where
+the site's assets actually live:
+
+- Every asset the **public site** uses is committed in the frontend repository —
+  the hero video, the poster, the portrait, the certificate PDFs. None of it is
+  affected.
+- The export copies referenced uploads into `frontend/public/` and those get
+  committed too, so any upload that has been *published and exported* is
+  permanently safe. Only uploads added and not yet exported are at risk.
+
+`STORAGE_ROOT` is still set explicitly rather than left to default. The
+application refuses to start in production without it, and that check earns its
+keep here: the point is that the location is a decision somebody made, not a
+default nobody noticed.
+
+### Upgrading later
+
+Move the service to a paid plan, restore the `disk:` block in `render.yaml`
+(mount path `/var/data`, 1 GB), and set `STORAGE_ROOT=/var/data/storage`. A disk
+pins the service to one instance and rules out zero-downtime deploys —
+acceptable for a single-operator CMS; the alternative is object storage, which
+is a larger change than this phase.
+
+**Existing local uploads are not migrated automatically.** To carry them over,
+copy `backend/storage/` into the disk once, or re-upload through the admin.
 
 `STORAGE_ROOT` is read in exactly one place (`Settings.resolved_storage_root`).
 It used to be recomputed from `__file__` in two separate modules, which worked
 only while both copies agreed and made a mounted volume impossible;
 `test_storage_root_has_one_definition` now asserts they are the same object.
-
-**Existing local uploads are not migrated automatically.** To carry them over,
-copy `backend/storage/` into the disk once, or re-upload through the admin.
 
 ---
 
@@ -765,7 +1017,7 @@ with the command to run.
 | Admin thumbnails broken, list works | Same cookie problem, on `<img>` requests |
 | Admin typography looks wrong | Google Fonts blocked by CSP — check `style-src`/`font-src` |
 | CORS error in the browser console | Origin not in `CORS_ORIGINS`, or http where https is required |
-| Media 404s after a deploy | No persistent disk, or `STORAGE_ROOT` outside the mount (§4) |
+| Media 404s after a deploy | Expected on the free tier — no persistent disk (§4). On a paid plan, `STORAGE_ROOT` outside the mount |
 | Contact form rate-limits everyone at once | `TRUSTED_PROXY_COUNT` still 0 behind Render |
 | Publish succeeds, site unchanged | Expected. Export and push (§15) |
 | Health check fails on first deploy | Cold Neon connection ~3.2 s. Raise the timeout |
@@ -794,8 +1046,8 @@ history is clean, so no rewrite is needed.
 **3. Enable 2FA** — §14. Must be done before the site is public.
 
 **4. Create the Render Web Service** from `render.yaml` (Blueprint), or manually
-with the settings in §3. Supply the five `sync: false` values. Attach the 1 GB
-disk at `/var/data` (§4).
+with the settings in §3. Supply the five `sync: false` values. No disk is
+attached on the free tier, so uploaded media is ephemeral (§4).
 
 **5. Run the first migration** — §22.
 
