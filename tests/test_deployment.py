@@ -278,6 +278,33 @@ def test_no_wildcard_origin_is_ever_returned(client: TestClient) -> None:
 # ------------------------------------------------------------ health check --
 
 
+def test_root_greets_without_volunteering_anything(client: TestClient) -> None:
+    """
+    `/` returns a greeting rather than a bare 404, so opening the service in a
+    browser does not look broken.
+
+    It must stay a fixed string. Anyone can reach this, so a version number, an
+    environment name or a pointer to the docs would be free reconnaissance.
+    """
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Welcome to Majeed Portfolio Backend"}
+
+    body = response.text.lower()
+    for leak in ("version", "environment", "/docs", "openapi", "python", "fastapi"):
+        assert leak not in body
+
+
+def test_root_is_outside_the_api_prefix(client: TestClient) -> None:
+    """The greeting is at `/`, and must not shadow or duplicate under `/api`."""
+    from app.main import app
+
+    paths = list(app.openapi()["paths"])
+    assert "/" in paths
+    assert "/api/" not in paths
+    assert "/api" not in paths
+
+
 def test_health_is_unauthenticated_and_says_nothing_useful_to_an_attacker(
     client: TestClient,
 ) -> None:

@@ -120,6 +120,9 @@ async def internal_error(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+# The greeting at `/`, deliberately outside the `/api` prefix.
+app.include_router(health.root_router)
+
 app.include_router(health.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 
