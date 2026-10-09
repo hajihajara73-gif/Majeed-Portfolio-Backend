@@ -175,12 +175,28 @@ browser bundle and are public — never put a credential in a `VITE_` variable:
 | `VITE_CONTACT_ENDPOINT` | `https://api.DOMAIN/api/public/contact` |
 | `VITE_API_BASE_URL` | `https://api.DOMAIN` |
 
+**Set the Type to `Config`, not `Secret`.** Vercel warns about this, and it is
+right to: *"Remove the public framework prefix to keep this value private."* A
+`VITE_`-prefixed variable is compiled into the JavaScript bundle, so marking it
+Secret is a contradiction — Vercel would treat it as write-only while the value
+sits in a file anyone can download. All three are URLs the browser connects to
+anyway, so Config is both correct and safe.
+
+The rule runs both ways: anything `VITE_` must be Config, and anything that must
+stay secret must never carry a `VITE_` prefix. The real secrets — `DATABASE_URL`,
+`SECRET_KEY`, `DEPLOY_HOOK_URL` — live on Render and never appear here.
+
 **Set these before the first build you intend to keep.** They are read at build
 time, not at runtime: `VITE_API_BASE_URL` is baked into the admin bundle and into
 its Content-Security-Policy, and `VITE_SITE_URL` decides whether a canonical
 link, `og:url` and `sitemap.xml` are emitted at all. A build made without them
 produces a site whose admin cannot reach the API and whose sitemap does not
 exist. Redeploy after setting them.
+
+Leaving the scope at "Production and Preview" is fine. Preview builds then point
+at the same API, though the contact form will not work there — `CORS_ORIGINS`
+names exact origins and does not include Vercel's preview URLs. That is
+deliberate; see §23.
 
 Then **Settings → Domains**: add `DOMAIN` and `www.DOMAIN`, with `www`
 redirecting to the apex.
