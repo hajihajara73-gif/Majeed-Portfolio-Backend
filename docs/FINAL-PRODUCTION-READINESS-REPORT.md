@@ -37,8 +37,14 @@ code:
 Items 1 and 2 are Render and Vercel dashboard changes. Item 3 is a few minutes
 in the admin plus some revocations. None require code.
 
+A fourth finding — the live site had no canonical URL, no Open Graph image and
+a 404 sitemap, so shared links produced no preview card — **was fixed in this
+pass and verified in production.** The site URL now resolves from the
+deployment itself rather than from a dashboard field (§8.2, §D1).
+
 Three fixes were made in code during this pass, each prompted by something
-observed rather than assumed; they are in §8.
+observed rather than assumed; they are in §8. Two of the three are confirmed
+working on the live site, the third by construction.
 
 ---
 
@@ -186,20 +192,24 @@ Full detail in `docs/SEO.md`.
 | `/admin/` excluded from indexing | yes |
 | HTTPS and HSTS | yes |
 | No `TODO_REPLACE_` placeholder visible on the page | confirmed |
-| **`<link rel="canonical">`** | **absent** |
-| **`og:url`, absolute `og:image`** | **absent** |
-| **`/sitemap.xml`** | **404** |
+| `<link rel="canonical">` | **was absent — now present** |
+| `og:url`, absolute `og:image` | **were absent — now present** |
+| `/sitemap.xml` | **was 404 — now 200** |
 
-**D1 — the live build ran without a site URL.** One cause for the three
-failures above: with no site URL the build deliberately emits nothing rather
-than a wrong domain, and `robots.txt` says so in as many words — which is how
-this was diagnosed. The visible consequence is that a link to the site shared
-on LinkedIn or WhatsApp gets a title and description but **no preview image**,
-because scrapers ignore a root-relative `og:image`. For a portfolio whose
-purpose is being shared, that is the most user-visible item in this report.
+**D1 — the live build ran without a site URL. Found, fixed, verified in
+production.** One cause for all three failures: with no site URL the build
+deliberately emits nothing rather than a wrong domain, and `robots.txt` said so
+in as many words — which is how it was diagnosed. The consequence was that a
+link to the site shared on LinkedIn or WhatsApp got a title and description but
+**no preview image**, because scrapers ignore a root-relative `og:image`. For a
+portfolio whose purpose is being shared, that was the most user-visible finding
+in this report.
 
 Fixed in code so it no longer depends on anyone remembering a dashboard field
-(§8.2). It resolves on the next deploy.
+(§8.2). The deploy that carried this commit picked it up with no dashboard
+change, and the live site now serves a canonical link, `og:url`, an absolute
+`og:image`, a `sitemap.xml` returning 200 and a `robots.txt` pointing at it.
+Verified after deploy, not predicted.
 
 **D2 — structured data (JSON-LD) is absent.** A deliberate omission, not a
 gap: every field a `schema.org/Person` block wants is subject to this
@@ -309,14 +319,20 @@ after it returns 401, with blank media thumbnails.
 
 The admin bundle contains no portfolio content, so that host string can only
 have come from `VITE_API_BASE_URL`: the variable is **set, to the wrong
-value**, and needs changing rather than adding. The bundle hash is also
-unchanged from the previously-inspected build, so no new build has shipped
-since.
+value**, and needs changing rather than adding.
 
-For comparison, a local build against the intended values produces
-`/admin/assets/index-BSj9kaMr.js`, which references
-`api.mohammedmajeedportfolio.me` and no `onrender.com` host at all. A changed
-hash is therefore the signal that a corrected build actually shipped.
+This was then confirmed beyond doubt. Deploying this commit produced a fresh
+build — `/admin/assets/index-2m4vgttT.js`, a new hash — and it **still**
+references `majeed-portfolio-backend.onrender.com` and no
+`api.mohammedmajeedportfolio.me`. So the value is not stale; it is the value
+currently configured on Vercel. For comparison, a local build against the
+intended values references `api.mohammedmajeedportfolio.me` and no
+`onrender.com` host at all.
+
+The mitigation shipped in the same build and is working: loading
+`https://mohammedmajeedportfolio.me/admin/` now shows the banner from §8.3,
+naming both hosts and the fix. The CMS is still unusable in production — but it
+now says why, on its own login screen, instead of returning ten silent 401s.
 
 The public site is **unaffected**: its contact POST carries no cookie, and CORS
 permits both hosts, which is why the form works while the admin does not.
@@ -418,6 +434,9 @@ Verified by building with no `VITE_SITE_URL`:
 - `VERCEL_ENV=preview` → all absent, which is correct: a preview must not
   compete with production in an index.
 
+Then verified **in production**: the deploy carrying this commit emitted all of
+it with no dashboard change, and `/sitemap.xml` returns 200.
+
 ### 8.3 The admin now names its own misconfiguration
 
 `frontend/admin/src/lib/api.ts`, `frontend/admin/src/pages/Login.tsx`
@@ -435,6 +454,10 @@ Verified by serving the real built bundle under a mapped hostname:
 | `mohammedmajeedportfolio.me` | `majeed-portfolio-backend.onrender.com` | shown |
 | `api-admin.onrender.com` | `majeed-portfolio-backend.onrender.com` | silent, same site |
 | `localhost` | same | silent, exempt |
+
+Also verified on the live site after deploy: the banner appears on
+`https://mohammedmajeedportfolio.me/admin/`, which is the correct behaviour for
+the deployment's current state.
 
 The registrable domain is approximated as the last two labels. Correct here and
 in every common case; a multi-label public suffix would compare equal where it
@@ -482,19 +505,20 @@ startup error names the exact problem — read it.
 | `VITE_SITE_URL` | `https://mohammedmajeedportfolio.me` | Config |
 
 `VITE_API_BASE_URL` already exists and holds the `onrender.com` host — **edit
-it**, do not add a second one.
+it**, do not add a second one. Confirmed by a fresh build after this audit,
+which still produced the `onrender.com` host (§F1).
+
+`VITE_SITE_URL` is now optional — the fallback in §8.2 covers it, verified in
+production — but setting it explicitly is clearer and takes precedence.
 
 `Config`, never `Secret`: a `VITE_`-prefixed variable is compiled into the
 public bundle, so marking it Secret would have Vercel treat it as write-only
 while the value sits in a file anyone can download.
 
-Then **redeploy** — variables do not apply to an existing build. Confirm the
-admin bundle's filename hash has changed; if it has not, the new build did not
-ship. Then sign in and load Media: thumbnails appearing means the cookie is
-being sent.
-
-`VITE_SITE_URL` is now optional thanks to §8.2, but setting it explicitly is
-clearer and takes precedence.
+Then **redeploy** — variables do not apply to an existing build. The clearest
+confirmation is that the banner on the admin login screen disappears; it is
+shown there now and names both hosts. Then sign in and load Media: thumbnails
+appearing means the cookie is being sent.
 
 ### Admin
 

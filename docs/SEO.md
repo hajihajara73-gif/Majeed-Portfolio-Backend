@@ -122,34 +122,40 @@ Both as designed.
 | `/admin/` excluded from indexing | yes — `X-Robots-Tag: noindex, nofollow` |
 | HTTPS, HSTS | yes — `max-age=63072000; includeSubDomains` |
 | LCP / CLS | 948 ms / 0.0011 |
-| **`<link rel="canonical">`** | **absent** |
-| **`og:url`, absolute `og:image`** | **absent** |
-| **`/sitemap.xml`** | **404** |
+| `<link rel="canonical">` | **was absent — now present** |
+| `og:url`, absolute `og:image` | **were absent — now present** |
+| `/sitemap.xml` | **was 404 — now 200** |
+| `robots.txt` | now carries a `Sitemap:` line |
 
-The last three are one cause, not three: the live build ran without a site URL.
-See §5.
+The last four were a single cause, and it is fixed. See §5.
 
 ---
 
-## 5. The one real gap
+## 5. The gap that was found, and closed
 
-The deployed bundle was built with no `VITE_SITE_URL`, so the live page has no
-canonical link, no `og:url`, no absolute `og:image`, and `/sitemap.xml` returns
-404. `robots.txt` states the reason, which is how this was diagnosed.
+The deployed bundle had been built with no `VITE_SITE_URL`, so the live page
+had no canonical link, no `og:url`, no absolute `og:image`, and
+`/sitemap.xml` returned 404. `robots.txt` stated the reason, which is how it
+was diagnosed.
 
-The practical effect: a link to the site posted on LinkedIn or WhatsApp gets a
-title and description but **no preview image**, because social scrapers ignore
-a root-relative `og:image`. For a portfolio whose purpose is being shared, that
-is the most visible consequence of the whole audit.
+The practical effect was that a link to the site posted on LinkedIn or WhatsApp
+got a title and description but **no preview image**, because social scrapers
+ignore a root-relative `og:image`. For a portfolio whose purpose is being
+shared, that was the most visible finding of the whole audit.
 
-**It self-heals on the next deploy.** The `VERCEL_PROJECT_PRODUCTION_URL`
-fallback (§2) was added for precisely this and is verified; any production
-build on Vercel now resolves the domain from the platform. Nothing needs to be
-set by hand, though setting `VITE_SITE_URL` explicitly is still the clearer
-choice and takes precedence.
+**Fixed and verified in production.** The `VERCEL_PROJECT_PRODUCTION_URL`
+fallback (§2) was added for precisely this. The next deploy picked it up with
+no dashboard change, and the live site now serves:
 
-After the next deploy, re-run the checks in §3 and confirm `/sitemap.xml`
-returns 200.
+```
+<link rel="canonical" href="https://mohammedmajeedportfolio.me/">
+<meta property="og:url" content="https://mohammedmajeedportfolio.me/">
+/sitemap.xml  ->  200
+robots.txt    ->  Sitemap: https://mohammedmajeedportfolio.me/sitemap.xml
+```
+
+Setting `VITE_SITE_URL` explicitly is still the clearer choice and takes
+precedence, but it is no longer required for correct output.
 
 ---
 
@@ -177,10 +183,11 @@ Not oversights. Each is a decision.
 
 ## 7. Outstanding
 
-- [ ] Redeploy so the canonical link, `og:url`, absolute `og:image` and
-      `sitemap.xml` appear (§5). Verify with §3 rather than assuming.
+- [x] Canonical link, `og:url`, absolute `og:image` and `sitemap.xml` now
+      served — verified live after deploy (§5).
 - [ ] Paste the live URL into a link-preview debugger (LinkedIn Post Inspector,
-      or any Open Graph checker) and confirm the image renders.
+      or any Open Graph checker) and confirm the image renders. The tag and the
+      asset are both verified; what a given scraper does with them is not.
 - [ ] Submit the sitemap to Google Search Console, once it returns 200.
 - [ ] Content, not configuration: the **career section is nearly empty** on the
       live site — 157 characters, no dates — and there is **no résumé link**
