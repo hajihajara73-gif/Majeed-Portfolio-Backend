@@ -1,12 +1,16 @@
 # Deployment — Vercel, Render, Neon
 
-Prepared 2026-09-27, on top of the Phase 7 hardening (`cd84c75`). Everything here
-was exercised locally against a simulation of the production serving model; what
-could not be verified without live services is marked **MANUAL** and says why.
+Prepared 2026-09-27, updated 2026-10-11 once the site went live.
 
-No domain is assumed anywhere. Every host-specific value is an environment
-variable, and the applications **refuse to start or degrade honestly** when one
-is missing rather than guessing.
+The deployment exists: **<https://mohammedmajeedportfolio.me>** on Vercel, with
+the API at **<https://api.mohammedmajeedportfolio.me>** on Render and Neon behind
+it. The values below are therefore real, not placeholders.
+
+Every host-specific value is an environment variable — nothing is hard-coded in
+the source — and the applications **refuse to start or degrade honestly** when
+one is missing rather than guessing. `docs/FINAL-PRODUCTION-READINESS-REPORT.md`
+records what was verified against the live deployment and what is still
+outstanding.
 
 **Start at §0 — it is the ordered runbook for this specific deployment.** The
 numbered sections after it are the reference material behind each step.
@@ -19,14 +23,14 @@ The chosen shape, from the decisions taken on 2026-10-09:
 
 | | Where | Host |
 | --- | --- | --- |
-| Public site + admin | Vercel | `DOMAIN` (apex) |
-| API | Render, **free tier, no disk** | `api.DOMAIN` |
+| Public site + admin | Vercel | `mohammedmajeedportfolio.me` (apex) |
+| API | Render, **free tier, no disk** | `api.mohammedmajeedportfolio.me` |
 | Database | Neon | — |
 
-Throughout, **`DOMAIN` means your `.me` domain** — substitute it everywhere it
-appears. The apex layout keeps the site and the API on the same registrable
-domain, which is what lets the admin session cookie stay on `SameSite=Lax`
-(§9); do not split them across different domains.
+The domain is live, so the values below are the real ones rather than
+placeholders. The apex layout keeps the site and the API on the same
+registrable domain, which is what lets the admin session cookie stay on
+`SameSite=Lax` (§9); do not split them across different domains.
 
 **The Render service is already live** at
 `https://majeed-portfolio-backend.onrender.com`. That hostname works now and
@@ -34,8 +38,8 @@ should stay in `ALLOWED_HOSTS` alongside the custom one, so the service keeps
 answering through the DNS cutover.
 
 Do **not** point the admin at it, though. `VITE_API_BASE_URL` must be
-`https://api.DOMAIN`: the session cookie is `SameSite=Lax` and a browser sends
-it only within one registrable domain, so a site on `DOMAIN` calling
+`https://api.mohammedmajeedportfolio.me`: the session cookie is `SameSite=Lax` and a browser sends
+it only within one registrable domain, so a site on `mohammedmajeedportfolio.me` calling
 `onrender.com` produces a login that appears to work and a `401` on everything
 after it, with blank media thumbnails. The contact form is unaffected — it
 sends no cookie — so `VITE_CONTACT_ENDPOINT` may use either host.
@@ -126,8 +130,8 @@ enter:
 | `SESSION_COOKIE_SAMESITE` | `lax` |
 | `DATABASE_URL` | the **rotated** Neon string, including `?sslmode=require` |
 | `SECRET_KEY` | a fresh value — `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-| `CORS_ORIGINS` | `https://DOMAIN` |
-| `ALLOWED_HOSTS` | `majeed-portfolio-backend.onrender.com,api.DOMAIN` |
+| `CORS_ORIGINS` | `https://mohammedmajeedportfolio.me` |
+| `ALLOWED_HOSTS` | `majeed-portfolio-backend.onrender.com,api.mohammedmajeedportfolio.me` |
 | `DEPLOY_HOOK_URL` | leave empty for now — see step 8 |
 
 `ALLOWED_HOSTS` lists **both** the Render hostname and your custom one, so the
@@ -151,7 +155,7 @@ curl -H "Host: evil.invalid" https://majeed-portfolio-backend.onrender.com/api/h
 
 ### 5. Add the API's custom domain on Render
 
-In the service's **Settings → Custom Domains**, add `api.DOMAIN`. Render shows
+In the service's **Settings → Custom Domains**, add `api.mohammedmajeedportfolio.me`. Render shows
 the CNAME target to use. Do the DNS in step 7.
 
 ### 6. Create the Vercel project
@@ -171,9 +175,9 @@ browser bundle and are public — never put a credential in a `VITE_` variable:
 
 | Variable | Value |
 | --- | --- |
-| `VITE_SITE_URL` | `https://DOMAIN` |
-| `VITE_CONTACT_ENDPOINT` | `https://api.DOMAIN/api/public/contact` |
-| `VITE_API_BASE_URL` | `https://api.DOMAIN` |
+| `VITE_SITE_URL` | `https://mohammedmajeedportfolio.me` |
+| `VITE_CONTACT_ENDPOINT` | `https://api.mohammedmajeedportfolio.me/api/public/contact` |
+| `VITE_API_BASE_URL` | `https://api.mohammedmajeedportfolio.me` |
 
 **Set the Type to `Config`, not `Secret`.** Vercel warns about this, and it is
 right to: *"Remove the public framework prefix to keep this value private."* A
@@ -198,7 +202,7 @@ at the same API, though the contact form will not work there — `CORS_ORIGINS`
 names exact origins and does not include Vercel's preview URLs. That is
 deliberate; see §23.
 
-Then **Settings → Domains**: add `DOMAIN` and `www.DOMAIN`, with `www`
+Then **Settings → Domains**: add `mohammedmajeedportfolio.me` and `www.mohammedmajeedportfolio.me`, with `www`
 redirecting to the apex.
 
 ### 7. DNS at Namecheap
@@ -223,10 +227,10 @@ the records resolve.
 Check:
 
 ```bash
-nslookup DOMAIN
-nslookup api.DOMAIN
-curl -I https://DOMAIN            # 200, and the security headers from §10
-curl https://api.DOMAIN/api/health
+nslookup mohammedmajeedportfolio.me
+nslookup api.mohammedmajeedportfolio.me
+curl -I https://mohammedmajeedportfolio.me            # 200, and the security headers from §10
+curl https://api.mohammedmajeedportfolio.me/api/health
 ```
 
 ### 8. Decide on the deploy hook
@@ -252,15 +256,15 @@ Render. Treat it as a password; anyone holding it can trigger unlimited builds.
 Run the "After deployment" table in §19. The ones that catch real breakage:
 
 ```bash
-curl -I https://DOMAIN | grep -i content-security-policy    # present
-curl https://api.DOMAIN/api/admin/projects                  # 401
-curl -H "Host: evil.invalid" https://api.DOMAIN/api/health  # 400
+curl -I https://mohammedmajeedportfolio.me | grep -i content-security-policy    # present
+curl https://api.mohammedmajeedportfolio.me/api/admin/projects                  # 401
+curl -H "Host: evil.invalid" https://api.mohammedmajeedportfolio.me/api/health  # 400
 ```
 
-Then in a browser: the site at `https://DOMAIN` with a silent console, the
-contact form end to end, `https://DOMAIN/admin/` sign-in with 2FA, and a media
+Then in a browser: the site at `https://mohammedmajeedportfolio.me` with a silent console, the
+contact form end to end, `https://mohammedmajeedportfolio.me/admin/` sign-in with 2FA, and a media
 thumbnail loading in the admin — that last one proves the session cookie is
-crossing to `api.DOMAIN`, which is the thing the apex layout exists to make work.
+crossing to `api.mohammedmajeedportfolio.me`, which is the thing the apex layout exists to make work.
 
 ### 10. Still outstanding after all this
 
