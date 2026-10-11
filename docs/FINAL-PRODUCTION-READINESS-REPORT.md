@@ -27,10 +27,11 @@ code:
 
 1. **The API is running in development mode.** `/docs` and `/openapi.json` are
    public, the `Host` allow-list is inactive, and the API sends no HSTS.
-2. **The admin CMS is unusable in production.** The deployed bundle targets the
-   `onrender.com` host, which is cross-site from the site's own domain, so the
-   `SameSite=Lax` session cookie is never sent back and every request after
-   login returns 401.
+2. **`VITE_API_BASE_URL` on Vercel is set to the `onrender.com` host**, which
+   is cross-site from the site's own domain, so a `SameSite=Lax` session cookie
+   can never be sent back. This made the CMS unusable in production; the client
+   now corrects it at runtime (§8.3), so the admin works, but the variable is
+   still wrong and should still be fixed.
 3. **Two-factor authentication is not enabled**, and credentials exposed during
    earlier work have not been verified as rotated.
 
@@ -329,10 +330,14 @@ currently configured on Vercel. For comparison, a local build against the
 intended values references `api.mohammedmajeedportfolio.me` and no
 `onrender.com` host at all.
 
-The mitigation shipped in the same build and is working: loading
-`https://mohammedmajeedportfolio.me/admin/` now shows the banner from §8.3,
-naming both hosts and the fix. The CMS is still unusable in production — but it
-now says why, on its own login screen, instead of returning ten silent 401s.
+**The CMS now works in spite of it.** §8.3 makes the client correct a
+cross-site base to the same-site `api.` origin, because the configured one
+cannot carry a session cookie under any circumstances. Verified with a bundle
+built against the wrong value: requests go to
+`api.mohammedmajeedportfolio.me`, there is no banner, and no CSP violation.
+
+The Vercel variable is still wrong and should still be corrected (§9). The
+difference is that the admin is usable while it is.
 
 The public site is **unaffected**: its contact POST carries no cookie, and CORS
 permits both hosts, which is why the form works while the admin does not.
@@ -437,32 +442,60 @@ Verified by building with no `VITE_SITE_URL`:
 Then verified **in production**: the deploy carrying this commit emitted all of
 it with no dashboard change, and `/sitemap.xml` returns 200.
 
-### 8.3 The admin now names its own misconfiguration
+### 8.3 The admin corrects a cross-site API base instead of failing
 
-`frontend/admin/src/lib/api.ts`, `frontend/admin/src/pages/Login.tsx`
+`frontend/admin/src/lib/api.ts`, `frontend/admin/vite.config.ts`,
+`frontend/admin/src/pages/Login.tsx`
 
-The cross-site cookie failure (§F1) cost three rounds of diagnosis because
-nothing about ten 401s points at its cause. `crossSiteApiWarning()` compares
-the configured API's registrable domain against the admin's own and, on a
-mismatch, shows a banner on the login screen naming both hosts and explaining
-that the `SameSite=Lax` cookie will not be sent.
+The cross-site cookie failure (§F1) cost several rounds of diagnosis because
+nothing about ten 401s points at its cause. The first version of this fix
+*announced* the problem on the login screen. That was an improvement over
+silence, but it still left the CMS unusable while the dashboard value went
+uncorrected.
 
-Verified by serving the real built bundle under a mapped hostname:
+A cross-site API base is not a suboptimal choice — it is **non-functional**. A
+`SameSite=Lax` cookie will never be sent to a different registrable domain, so
+that configuration cannot work under any circumstances. `resolveApiBase()`
+therefore prefers an origin that can: when the configured base is cross-site
+from the admin's own host, the client uses
+`https://api.<its own registrable domain>`.
 
-| Loaded as | API base | Banner |
-|---|---|---|
-| `mohammedmajeedportfolio.me` | `majeed-portfolio-backend.onrender.com` | shown |
-| `api-admin.onrender.com` | `majeed-portfolio-backend.onrender.com` | silent, same site |
-| `localhost` | same | silent, exempt |
+The inference is deliberately narrow. It runs only when the configured value is
+already broken, never to override a working one, and never in development — a
+correctly-configured build never reaches it. It is also never silent: a
+`console.warn` names both origins and `apiBaseCorrection` is exported non-null.
 
-Also verified on the live site after deploy: the banner appears on
-`https://mohammedmajeedportfolio.me/admin/`, which is the correct behaviour for
-the deployment's current state.
+The admin's CSP had to move with it. `connect-src`, `img-src` and `frame-src`
+are derived from `VITE_API_BASE_URL`, so they would have permitted exactly the
+origin that cannot work and forbidden the one that can — the correction would
+have been blocked before it was attempted. The build now adds the same-site
+origin, **only** when the configured one is cross-site.
+
+Verified by building with the wrong value Vercel currently holds and serving
+the real bundle under a mapped hostname:
+
+| | Result |
+|---|---|
+| API requests went to | `api.mohammedmajeedportfolio.me` |
+| Sample request | `https://api.mohammedmajeedportfolio.me/api/auth/me` |
+| Banner on the login screen | none |
+| Console warning | present, naming both origins |
+| CSP violations | none |
+
+And with the correct value, confirming nothing changes for a sound build:
+
+| | Result |
+|---|---|
+| `connect-src` | `'self' https://api.mohammedmajeedportfolio.me` — one origin, no fallback added |
+| Bundle references `onrender.com` | no |
 
 The registrable domain is approximated as the last two labels. Correct here and
 in every common case; a multi-label public suffix would compare equal where it
-should not, so it stays quiet rather than crying wolf. This does not fix the
-deployment — it makes the deployment's state legible.
+should not, so it under-reaches rather than over-reaching.
+
+This is a safety net, not the fix. `VITE_API_BASE_URL` is still wrong on Vercel
+and should still be corrected (§9) — the admin simply no longer waits for that
+to be usable.
 
 ### 8.4 `CLAUDE.md` command paths corrected
 

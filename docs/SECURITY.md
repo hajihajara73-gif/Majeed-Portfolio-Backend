@@ -231,17 +231,32 @@ signing in **appears to work**, because the API really does authenticate and
 really does set the cookie — and then every subsequent request returns 401 and
 media thumbnails come up blank. Nothing in that failure points at its cause.
 
-The apex + `api.` subdomain layout exists specifically to avoid it. Two
-safeguards now make it self-announcing rather than mysterious:
+The apex + `api.` subdomain layout exists specifically to avoid it. Three
+safeguards now apply:
 
 1. `frontend/.env.production` and `frontend/admin/.env.production` both carry
    the reason in a comment, at the line someone would change.
-2. The admin detects it at runtime. `crossSiteApiWarning()` in
-   `frontend/admin/src/lib/api.ts` compares the API's registrable domain with
-   the admin's own and, on a mismatch, shows a banner on the login screen
-   naming both hosts and the cause. Verified by loading the admin under a
-   mapped hostname: the banner appears cross-site, and stays silent same-site
-   and on localhost.
+2. **The admin corrects it at runtime.** `resolveApiBase()` in
+   `frontend/admin/src/lib/api.ts` compares the configured API's registrable
+   domain with the admin's own; when they differ, the configured value cannot
+   carry the session cookie *at all*, so the client uses
+   `https://api.<its own registrable domain>` instead. A cross-site base is not
+   a suboptimal choice to be reported — it is a guaranteed failure, and
+   preferring an origin that can work is strictly better than using one that
+   cannot.
+3. The correction is never silent: the module logs a `console.warn` naming both
+   origins, and `apiBaseCorrection` is exported non-null whenever it applies.
+
+The inference in (2) is deliberately narrow — it runs only when the configured
+value is already broken, never to override a working one, and never in
+development. A correctly-configured build never reaches it, and its bundle and
+CSP are byte-for-byte what they were before.
+
+The admin's build-time CSP allows the corrected origin as well, but **only when
+the configured one is cross-site**. Without that the correction would be
+blocked by `connect-src` before it was ever attempted — the policy is derived
+from `VITE_API_BASE_URL`, so it would otherwise permit exactly the origin that
+cannot work and forbid the one that can.
 
 The alternative — `SameSite=None` — is deliberately not used. It requires
 `Secure`, weakens CSRF posture, and the startup validator rejects it unless
