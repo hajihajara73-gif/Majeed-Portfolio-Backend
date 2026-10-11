@@ -147,4 +147,8 @@ Full procedure, environment variables, DNS and smoke tests:
 | `docs/DEPLOYMENT.md` | Vercel + Render + Neon, environment variables, DNS, smoke tests, manual actions |
 | `docs/PHASE-7-PRODUCTION-AUDIT.md` | Security audit findings and evidence. Its paths predate the repository split |
 | `docs/SPEC.md` | The public site's specification, for context |
+| `docs/SECURITY.md` | Operational security posture, what was verified against the live API, open findings |
+| `docs/BACKUP-AND-RECOVERY.md` | What holds state, how to back it up, how to restore it |
+| `docs/SEO.md` | The public site's metadata, for context |
+| `docs/FINAL-PRODUCTION-READINESS-REPORT.md` | Pre-launch audit of the live deployment, and what is still open |
 | `CLAUDE.md` | Working rules for this codebase |
