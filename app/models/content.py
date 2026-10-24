@@ -433,6 +433,31 @@ class CareerEntry(UUIDPrimaryKey, Timestamps, Base):
 # ---------------------------------------------------------------------------
 
 
+class AchievementCategory(UUIDPrimaryKey, Timestamps, Base):
+    """A topical grouping for certificates — "Cyber Security", "Python".
+
+    Deliberately the same shape as SkillCategory, because it does the same
+    job: a named bucket the admin orders by hand. `display_order` orders the
+    categories themselves; the `display_order` already on Achievement orders
+    the entries inside one.
+
+    An achievement's category is nullable, so nothing has to be categorised
+    and nothing breaks when a category is deleted.
+    """
+
+    __tablename__ = "achievement_categories"
+
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    achievements: Mapped[list[Achievement]] = relationship(
+        back_populates="category"
+    )
+
+
 class Achievement(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "achievements"
 
@@ -463,6 +488,15 @@ class Achievement(UUIDPrimaryKey, Timestamps, Base):
         Boolean, default=True, nullable=False
     )
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Nullable and SET NULL on delete: an entry may be uncategorised, and
+    # removing a category must not take its certificates with it.
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("achievement_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    category: Mapped[AchievementCategory | None] = relationship(
+        back_populates="achievements"
+    )
 
     __table_args__ = (
         CheckConstraint(

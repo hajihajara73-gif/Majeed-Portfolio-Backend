@@ -138,6 +138,7 @@ for _router in (
     admin_files.router,
     admin_publish.router,
     admin_content.projects_router,
+    admin_content.achievement_categories_router,
     admin_content.achievements_router,
     admin_content.skills_router,
     admin_content.skill_categories_router,

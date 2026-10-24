@@ -26,6 +26,7 @@ from app.models.base import utcnow
 from app.models.content import (
     AboutContent,
     Achievement,
+    AchievementCategory,
     CareerEntry,
     EducationEntry,
     ExpertiseItem,
@@ -104,6 +105,14 @@ def build_snapshot(db: Session) -> dict[str, Any]:
         select(Achievement)
         .where(Achievement.is_public.is_(True))
         .order_by(Achievement.display_order)
+    ).all()
+
+    # Exported whole rather than nested inside the achievements, so the site
+    # can render an empty category's heading or none at all — its own choice.
+    achievement_categories = db.scalars(
+        select(AchievementCategory)
+        .where(AchievementCategory.is_visible.is_(True))
+        .order_by(AchievementCategory.display_order, AchievementCategory.label)
     ).all()
 
     categories = db.scalars(
@@ -277,11 +286,26 @@ def build_snapshot(db: Session) -> dict[str, Any]:
             }
             for c in career
         ],
+        "achievementCategories": [
+            {
+                "id": c.slug,
+                "label": c.label,
+                "summary": c.summary,
+            }
+            for c in achievement_categories
+        ],
         "achievements": [
             {
                 "id": a.slug,
                 "title": a.title,
                 "type": a.achievement_type,
+                # The category's slug, not its uuid: the public site is static
+                # and must not carry database identifiers.
+                "categoryId": (
+                    a.category.slug
+                    if a.category is not None and a.category.is_visible
+                    else None
+                ),
                 "organization": a.organization,
                 "date": a.date_label,
                 "description": a.description,

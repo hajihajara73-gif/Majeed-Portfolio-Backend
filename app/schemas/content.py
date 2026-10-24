@@ -119,8 +119,38 @@ class ProjectOut(ORMModel):
 # ------------------------------------------------------------ achievements --
 
 
+class AchievementCategoryBase(Versioned):
+    label: str = Field(min_length=1, max_length=128)
+    summary: str | None = None
+    display_order: int = Field(default=0, ge=0, le=10_000)
+    is_visible: bool = True
+
+
+class AchievementCategoryCreate(AchievementCategoryBase):
+    slug: str = Field(min_length=1, max_length=64)
+
+    @field_validator("slug")
+    @classmethod
+    def _slug(cls, value: str) -> str:
+        return validate_slug(value)
+
+
+class AchievementCategoryUpdate(AchievementCategoryBase):
+    pass
+
+
+class AchievementCategoryOut(ORMModel):
+    id: str
+    slug: str
+    label: str
+    summary: str | None
+    display_order: int
+    is_visible: bool
+
+
 class AchievementBase(Versioned):
     title: str = Field(min_length=1, max_length=255)
+    category_id: str | None = None
     achievement_type: AchievementType = "certificate"
     organization: str | None = Field(default=None, max_length=255)
     date_label: str | None = Field(default=None, max_length=64)
@@ -158,6 +188,7 @@ class AchievementOut(ORMModel):
     slug: str
     title: str
     achievement_type: str
+    category_id: str | None
     organization: str | None
     date_label: str | None
     description: str | None

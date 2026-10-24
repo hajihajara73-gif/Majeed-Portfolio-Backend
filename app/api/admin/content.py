@@ -25,6 +25,7 @@ from app.core import audit
 from app.models.content import (
     AboutContent,
     Achievement,
+    AchievementCategory,
     CareerEntry,
     EducationEntry,
     ExpertiseItem,
@@ -44,6 +45,17 @@ from app.schemas.common import ReorderRequest
 # --------------------------------------------------------------------------
 # Simple resources
 # --------------------------------------------------------------------------
+
+achievement_categories_router = build_resource_router(
+    name="achievement-categories",
+    model=AchievementCategory,
+    create_schema=s.AchievementCategoryCreate,
+    update_schema=s.AchievementCategoryUpdate,
+    out_schema=s.AchievementCategoryOut,
+    order_by=(AchievementCategory.display_order, AchievementCategory.label),
+    serialise=ser.achievement_category_out,
+    unique_field="slug",
+)
 
 achievements_router = build_resource_router(
     name="achievements",

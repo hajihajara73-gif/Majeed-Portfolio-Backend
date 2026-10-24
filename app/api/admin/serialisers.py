@@ -14,6 +14,7 @@ from typing import Any
 from app.models.content import (
     AboutContent,
     Achievement,
+    AchievementCategory,
     CareerEntry,
     ContactMessage,
     EducationEntry,
@@ -68,12 +69,26 @@ def project_out(row: Project) -> dict[str, Any]:
     }
 
 
+def achievement_category_out(row: AchievementCategory) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "slug": row.slug,
+        "label": row.label,
+        "summary": row.summary,
+        "display_order": row.display_order,
+        "is_visible": row.is_visible,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
 def achievement_out(row: Achievement) -> dict[str, Any]:
     return {
         "id": str(row.id),
         "slug": row.slug,
         "title": row.title,
         "achievement_type": row.achievement_type,
+        "category_id": _id(row.category_id),
         "organization": row.organization,
         "date_label": row.date_label,
         "description": row.description,
