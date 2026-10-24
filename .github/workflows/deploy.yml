@@ -1,0 +1,108 @@
+name: Deploy backend to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'hajihajara73-gif/Majeed-Portfolio-Backend'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'   # matches the interpreter on the server
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check app tests
+
+      - name: Tests
+        # The suite runs against its own fixtures, never the production
+        # database. No DATABASE_URL is provided here on purpose.
+        run: pytest -q
+
+      - name: Configure SSH with host-key verification
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.EC2_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Ship the application files
+        # Excludes are explicit: no .env, no local venv, no git metadata, no
+        # caches. The server's /etc/portfolio-api.env is never touched.
+        run: |
+          rsync -az --delete \
+            --exclude '.git' --exclude '.github' \
+            --exclude '.env' --exclude '.env.*' \
+            --exclude '.venv' --exclude 'venv' \
+            --exclude '__pycache__' --exclude '*.pyc' \
+            --exclude '.pytest_cache' --exclude '.ruff_cache' \
+            --exclude 'storage' \
+            -e "ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes" \
+            ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/backend-release/
+
+      - name: Install, restart, health-check, roll back on failure
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} 'bash -euo pipefail -s' <<'EOS'
+            APP=/opt/portfolio/backend
+            VENV=/opt/portfolio/venv
+
+            # Keep the running release so a failed start can be undone.
+            sudo rm -rf /opt/portfolio/backend.prev
+            sudo cp -a "$APP" /opt/portfolio/backend.prev
+
+            sudo rsync -a --delete /tmp/backend-release/ "$APP"/
+            sudo chown -R portfolio:portfolio "$APP"
+            rm -rf /tmp/backend-release
+
+            sudo -u portfolio "$VENV/bin/pip" install -q .
+
+            sudo systemctl restart portfolio-api
+            sleep 8
+
+            ok=1
+            systemctl is-active --quiet portfolio-api || ok=0
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 http://127.0.0.1:8000/api/health)
+            echo "service=$(systemctl is-active portfolio-api) health=$code"
+            [ "$code" = "200" ] || ok=0
+
+            if [ "$ok" -ne 1 ]; then
+              echo "--- startup log (DSNs redacted) ---"
+              sudo journalctl -u portfolio-api -n 30 --no-pager | sed -E 's#postgresql[^ ]*#[REDACTED]#g'
+              echo "rolling back to the previous release"
+              sudo rsync -a --delete /opt/portfolio/backend.prev/ "$APP"/
+              sudo chown -R portfolio:portfolio "$APP"
+              sudo -u portfolio "$VENV/bin/pip" install -q . || true
+              sudo systemctl restart portfolio-api
+              sleep 6
+              echo "after rollback: $(systemctl is-active portfolio-api) $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/health)"
+              exit 1
+            fi
+            echo "backend deployed and healthy"
+          EOS
+
+      - name: Result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Backend deployed: ${{ github.sha }}"
+          else
+            echo "Backend deployment FAILED — rolled back to the previous release."
+          fi
