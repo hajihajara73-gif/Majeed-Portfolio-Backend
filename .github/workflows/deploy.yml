@@ -63,7 +63,9 @@ jobs:
       - name: Install dependencies and restart
         run: |
           set -euo pipefail
-          sudo -u portfolio /opt/portfolio/venv/bin/pip install -q .
+          # Absolute path: the working directory here is the runner workspace,
+          # not the deployed app, and the portfolio user cannot build from it.
+          sudo -u portfolio /opt/portfolio/venv/bin/pip install -q /opt/portfolio/backend
           sudo systemctl restart portfolio-api
           sleep 8
 
@@ -83,7 +85,7 @@ jobs:
             echo "rolling back"
             sudo rsync -a --delete /opt/portfolio/backend.prev/ "$APP"/
             sudo chown -R portfolio:portfolio "$APP"
-            sudo -u portfolio /opt/portfolio/venv/bin/pip install -q . || true
+            sudo -u portfolio /opt/portfolio/venv/bin/pip install -q /opt/portfolio/backend || true
             sudo systemctl restart portfolio-api
             sleep 6
             echo "after rollback: $(systemctl is-active portfolio-api) $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/health)"
