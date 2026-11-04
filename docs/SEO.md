@@ -24,15 +24,27 @@ that produce a real preview card, and a sitemap with one entry in it.
 
 | Output | Source | Needs the site URL? |
 |---|---|---|
-| `<title>`, `<meta name="description">` | `frontend/index.html` | no |
-| `og:title`, `og:description`, `og:type`, `twitter:card` | `frontend/index.html` | no |
+| `<title>`, `<meta name="description">` | authored in `src/content/seo.ts`, written into `frontend/index.html`, **rewritten in place by the plugin when the CMS overrides them** | no |
+| `og:type`, `twitter:card` | `frontend/index.html` | no |
 | `theme-color`, `lang="en"`, favicon | `frontend/index.html` | no |
-| `<link rel="canonical">` | `siteMetadata` plugin, `vite.config.ts` | **yes** |
+| `<noscript>` fallback content | `frontend/index.html` | no |
+| `meta robots` | `siteMetadata` plugin, `vite.config.ts` | no |
+| `og:title`, `og:description`, `og:site_name`, `og:locale` | same | no |
+| `twitter:title`, `twitter:description` | same | no |
+| `<link rel="canonical">` | same | **yes** |
 | `og:url` | same | **yes** |
-| `og:image` (absolute) | same | **yes** |
-| `sitemap.xml` | same, `generateBundle` | **yes** |
+| `og:image` (absolute), `:width`, `:height`, `:alt`, `twitter:image` | same | **yes** |
+| **JSON-LD** — `Person`, `WebSite`, `ProfilePage` | same, from `src/content/seo.ts` + `snapshot.json` | **yes** |
+| `sitemap.xml`, including `<lastmod>` | same, `generateBundle` | **yes** |
 | `robots.txt` | same | partly |
 | `X-Robots-Tag: noindex` on `/admin/*` | `frontend/vercel.json` | no |
+
+Three of those come from the **CMS** when it has an opinion: the title, the
+description and the social card (`seo_title`, `seo_description`,
+`og_image_id`). The plugin reads `src/content/snapshot.json` at build time and
+a real value there overrides the authored default. An absent snapshot is a
+normal state — a clone that has never run the CMS builds correctly from the
+source modules alone.
 
 The split matters: everything in the right-hand column is unknowable at author
 time, because a static build does not know what domain it will be served from.
@@ -163,18 +175,25 @@ precedence, but it is no longer required for correct output.
 
 Not oversights. Each is a decision.
 
-- **JSON-LD / structured data.** A `schema.org/Person` block would be a real
-  improvement and is the obvious next addition. It is not here because every
-  field it wants — job title, education, employer, credentials — is subject to
-  this repository's hard rule against inventing personal information, and the
-  CMS does not yet carry those fields in a form safe to publish as structured
-  claims. Adding it means deciding what is true, which is the author's call,
-  not the build's.
+- ~~**JSON-LD / structured data.**~~ **No longer absent — added 2026-11-04.**
+  The reason it was missing was that every field a `Person` block wants is a
+  claim about a real person, and the build is not entitled to invent one.
+  Mohammed then supplied the positioning, the degrees and the locations
+  directly, which removed the blocker. The facts now live in
+  `src/content/seo.ts` under the same no-invention rule as the rest of the
+  content layer, and the plugin emits `Person`, `WebSite` and `ProfilePage`.
+  See `SEO-AUDIT.md` §3.1.
+- **Project-level `CreativeWork` / `SoftwareSourceCode`.** Still absent, and
+  deliberately. There are no project pages, so there is no page for a project
+  entity to be the subject of, and Google produces no rich result for those
+  types.
 - **Per-section URLs and meta.** There is one document; hash anchors are not
   separate pages and should not pretend to be.
 - **`sitemap.xml` with multiple entries.** One page, one entry.
 - **Analytics.** None. No third-party script runs on the site, which is also
-  why the Content-Security-Policy can stay as tight as it is.
+  why the Content-Security-Policy can stay as tight as it is. Evaluated again
+  in `SEO-CONTENT-STRATEGY.md` §6; the recommendation is still not to add it,
+  and nothing has been added.
 - **`hreflang`.** Single language.
 - **Submitting to Search Console.** User-side, and worth doing once
   `/sitemap.xml` returns 200.
@@ -183,13 +202,30 @@ Not oversights. Each is a decision.
 
 ## 7. Outstanding
 
+Superseded by the 2026-11-04 audit. The live list is `FINAL-SEO-REPORT.md`
+§"Manual actions"; this is the short version.
+
 - [x] Canonical link, `og:url`, absolute `og:image` and `sitemap.xml` now
       served — verified live after deploy (§5).
+- [x] Structured data added (§6).
+- [x] A real 1200×630 social card, replacing the 848×478 background frame.
+- [x] The career section introduction and all four education locations filled.
+- [ ] **`www.mohammedmajeedportfolio.me` does not work in any browser** — the
+      TLS certificate does not cover it, and HSTS `includeSubDomains` removes
+      the fallback. Add the domain in the Vercel dashboard.
+      See `SEO-AUDIT.md` §4.
+- [ ] **The SEO title and description are not live.** They are authored in
+      `src/content/seo.ts`, but the published snapshot still carries the old
+      values and the CMS deliberately wins. Two fields in the admin, then
+      publish → `npm run content:pull` → commit.
+- [ ] **Career dates** are still `TODO_REPLACE_*` and render as nothing. Four
+      fields in the admin. Thin content is an SEO problem no amount of
+      metadata fixes.
+- [ ] Confirm which LinkedIn URL is correct — it feeds `sameAs`.
 - [ ] Paste the live URL into a link-preview debugger (LinkedIn Post Inspector,
-      or any Open Graph checker) and confirm the image renders. The tag and the
-      asset are both verified; what a given scraper does with them is not.
-- [ ] Submit the sitemap to Google Search Console, once it returns 200.
-- [ ] Content, not configuration: the **career section is nearly empty** on the
-      live site — 157 characters, no dates — and there is **no résumé link**
-      (`TODO_REPLACE_RESUME_PATH` is unfilled). Both are editable in the admin.
-      Thin content is an SEO problem no amount of metadata fixes.
+      or any Open Graph checker) and confirm the new card renders. The tag and
+      the asset are both verified; what a given scraper does with them is not.
+- [ ] Submit the sitemap to Google Search Console
+      (`GOOGLE-SEARCH-CONSOLE-SETUP.md`).
+- [ ] Validate the JSON-LD at `validator.schema.org` and the Rich Results Test.
+      Neither has an API, so neither could be run from here.

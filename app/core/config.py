@@ -59,6 +59,32 @@ class Settings(BaseSettings):
     # shared parent domain is the configuration to aim for.
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
+    # Cookie `Domain`. Unset means HOST-ONLY, which is the right default and
+    # the right behaviour whenever the admin and the API are the same origin
+    # (the Vite dev proxy, and the nginx deployment that proxies /api/).
+    #
+    # It exists because of a failure mode that is easy to miss. CSRF here is
+    # double-submit: the server issues a token in a readable cookie and the
+    # admin echoes it in a header. The admin can only echo a cookie it can
+    # READ, and a host-only cookie set by `api.example.com` is invisible to
+    # `document.cookie` on `example.com` — they are the same SITE but not the
+    # same HOST. The session cookie still rides along (SameSite=Lax permits
+    # same-site), so the session resolves and only the CSRF check fails: a 403
+    # "CSRF check failed" on every save, with a perfectly valid login.
+    #
+    # Setting this to the registrable domain — `example.com`, no leading dot —
+    # widens the CSRF cookie to cover both hosts and fixes that.
+    #
+    # Only the CSRF cookie uses it. The session cookie stays host-only on
+    # purpose: it is HttpOnly and is sent to the API automatically, so
+    # widening it would expose it to every subdomain for no benefit.
+    #
+    # Leave it UNSET unless the admin and the API are on different hosts of
+    # one registrable domain. A value the browser rejects — a public suffix
+    # such as `onrender.com`, or a domain that does not cover the API host —
+    # makes the browser drop the cookie entirely, which is worse than this bug.
+    cookie_domain: str | None = None
+
     # Sessions are absolute-expiry, not sliding, so a stolen cookie has a
     # bounded lifetime no matter how often it is used.
     session_lifetime_hours: int = 12

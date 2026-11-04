@@ -150,5 +150,11 @@ Full procedure, environment variables, DNS and smoke tests:
 | `docs/SECURITY.md` | Operational security posture, what was verified against the live API, open findings |
 | `docs/BACKUP-AND-RECOVERY.md` | What holds state, how to back it up, how to restore it |
 | `docs/SEO.md` | The public site's metadata, for context |
+| `docs/SEO-AUDIT.md` | Technical SEO audit of the live site, for context |
+| `docs/SEO-KEYWORD-STRATEGY.md` | Keyword strategy, for context |
+| `docs/GOOGLE-SEARCH-CONSOLE-SETUP.md` | Search Console setup and DNS verification |
+| `docs/SEO-MONITORING.md` | Search performance monitoring |
+| `docs/SEO-CONTENT-STRATEGY.md` | Content strategy and the analytics recommendation |
+| `docs/FINAL-SEO-REPORT.md` | PASS/FAIL on every SEO check and remaining manual actions |
 | `docs/FINAL-PRODUCTION-READINESS-REPORT.md` | Pre-launch audit of the live deployment, and what is still open |
 | `CLAUDE.md` | Working rules for this codebase |

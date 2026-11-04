@@ -538,6 +538,40 @@ def test_dashboard_numbers_come_from_the_database(
     assert body["publish"]["published"] is False
 
 
+def test_dashboard_counts_certificates_and_achievements_separately(
+    client: TestClient, auth: str
+) -> None:
+    """
+    They are two sections in the admin and two sections on the public site,
+    but one table split by `achievement_type`. Counting the table gave a
+    single "Achievements" number that was really both added together — the
+    dashboard read 11 when there were 10 certificates and 1 achievement.
+    """
+    for index in range(3):
+        response = client.post(
+            "/api/admin/achievements",
+            json={
+                "slug": f"cert-{index}",
+                "title": f"Certificate {index}",
+                "achievement_type": "certificate",
+            },
+            headers=headers(auth),
+        )
+        assert response.status_code == 201, response.text
+
+    for slug, kind in (("quiz", "competition"), ("prize", "award")):
+        response = client.post(
+            "/api/admin/achievements",
+            json={"slug": slug, "title": slug.title(), "achievement_type": kind},
+            headers=headers(auth),
+        )
+        assert response.status_code == 201, response.text
+
+    counts = client.get("/api/admin/dashboard").json()["counts"]
+    assert counts["certificates"] == 3
+    assert counts["achievements"] == 2
+
+
 # --------------------------------------------------------------------------
 # Singletons
 # --------------------------------------------------------------------------

@@ -10,6 +10,7 @@ from app.core import audit
 from app.models.admin import AuditLog
 from app.models.content import (
     Achievement,
+    AchievementCategory,
     CareerEntry,
     ContactMessage,
     EducationEntry,
@@ -51,7 +52,19 @@ def dashboard(db: DbDep, admin: AdminDep) -> dict:
                 Project.is_published.is_(True),
                 Project.archived_at.is_(None),
             ),
-            "achievements": count_rows(db, Achievement),
+            # Certificates and achievements are two separate sections, in the
+            # admin and on the public site, and they are two rows of the SAME
+            # table split by `achievement_type`. Counting the table gave one
+            # "Achievements" figure that was really both added together — 11,
+            # when there are 10 certificates and 1 achievement. Split here so
+            # each card counts the thing it is named after.
+            "certificates": count_rows(
+                db, Achievement, Achievement.achievement_type == "certificate"
+            ),
+            "achievements": count_rows(
+                db, Achievement, Achievement.achievement_type != "certificate"
+            ),
+            "achievement_categories": count_rows(db, AchievementCategory),
             "skills": count_rows(db, Skill),
             "skill_categories": count_rows(db, SkillCategory),
             "media": count_rows(db, MediaAsset),

@@ -58,6 +58,12 @@ def _set_session_cookies(
     )
     # The CSRF token is deliberately readable — the client must echo it in a
     # header, which is precisely what a cross-site page cannot do.
+    #
+    # `domain` matters here and nowhere else. The admin can only echo a cookie
+    # it can READ, and a host-only cookie set by `api.example.com` is invisible
+    # to `document.cookie` on `example.com`. Without `COOKIE_DOMAIN` set in
+    # that layout, every unsafe request fails the CSRF check while the session
+    # itself stays perfectly valid. See `Settings.cookie_domain`.
     response.set_cookie(
         settings.csrf_cookie_name,
         issued.csrf_token,
@@ -66,12 +72,18 @@ def _set_session_cookies(
         secure=settings.cookies_secure,
         samesite=settings.session_cookie_samesite,
         path="/",
+        domain=settings.cookie_domain,
     )
 
 
 def _clear_session_cookies(response: Response, settings: Settings) -> None:
     response.delete_cookie(settings.session_cookie_name, path="/")
-    response.delete_cookie(settings.csrf_cookie_name, path="/")
+    # Must match the attributes it was set with, or the browser keeps it: a
+    # cookie is identified by name + domain + path, so clearing a
+    # domain-scoped cookie without the domain silently leaves it in place.
+    response.delete_cookie(
+        settings.csrf_cookie_name, path="/", domain=settings.cookie_domain
+    )
 
 
 def _auth_error(error: AuthError) -> HTTPException:

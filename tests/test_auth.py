@@ -211,6 +211,64 @@ def test_unsafe_request_with_csrf_header_succeeds(
     assert response.status_code == 204
 
 
+# --------------------------------------------------------------------------
+# Cookie scope
+#
+# CSRF here is double-submit, so the admin has to be able to READ the cookie
+# in order to echo it in a header. A host-only cookie set by `api.example.com`
+# is invisible to `document.cookie` on `example.com` — same site, different
+# host — and the symptom is a 403 "CSRF check failed" on every save while the
+# session itself stays perfectly valid, because the session cookie is still
+# sent. `COOKIE_DOMAIN` is what widens it. These pin both halves.
+# --------------------------------------------------------------------------
+
+
+def _set_cookie_header(response, name: str) -> str:
+    """The raw Set-Cookie line for one cookie — attributes and all."""
+    for header in response.headers.get_list("set-cookie"):
+        if header.startswith(f"{name}="):
+            return header
+    raise AssertionError(f"no Set-Cookie for {name!r}")
+
+
+def test_cookies_are_host_only_when_no_domain_is_configured(
+    client: TestClient, admin: AdminUser
+) -> None:
+    """The default. Correct whenever the admin and API share an origin."""
+    response = login(client)
+
+    for name in (settings.session_cookie_name, settings.csrf_cookie_name):
+        assert "domain=" not in _set_cookie_header(response, name).lower()
+
+
+def test_csrf_cookie_carries_the_configured_domain(
+    client: TestClient, admin: AdminUser
+) -> None:
+    """
+    With COOKIE_DOMAIN set, the CSRF cookie is readable across hosts of the
+    registrable domain — which is the whole point of the setting.
+
+    The session cookie must NOT be widened with it: it is HttpOnly and is sent
+    to the API automatically, so broadening it would expose it to every
+    subdomain for no benefit.
+    """
+    from app.core.config import get_settings as _get_settings
+    from app.main import app
+
+    widened = _get_settings().model_copy(update={"cookie_domain": "example.com"})
+    app.dependency_overrides[_get_settings] = lambda: widened
+    try:
+        response = login(client)
+    finally:
+        app.dependency_overrides.pop(_get_settings, None)
+
+    csrf_header = _set_cookie_header(response, settings.csrf_cookie_name)
+    assert "domain=example.com" in csrf_header.lower()
+
+    session_header = _set_cookie_header(response, settings.session_cookie_name)
+    assert "domain=" not in session_header.lower()
+
+
 def test_revoked_session_stops_working(
     client: TestClient, admin: AdminUser, db_session: Session
 ) -> None:
