@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select
 
 from app.api.admin import serialisers as ser
@@ -22,7 +22,12 @@ from app.models.content import (
     SocialLink,
 )
 from app.schemas import content as s
-from app.services import contact_notifier, publish_service
+from app.services import (
+    contact_notifier,
+    conversation,
+    inbound_email,
+    publish_service,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin:dashboard"])
 
@@ -246,6 +251,176 @@ def update_message(
         row.updated_at = utcnow()
     db.commit()
     return ser.message_out(row)
+
+
+@messages_router.get("/{item_id}/thread", response_model=list[s.EmailMessageOut])
+def message_thread(item_id: str, db: DbDep, admin: AdminDep) -> list[dict]:
+    """The conversation for one enquiry, oldest first."""
+    row = get_or_404(db, ContactMessage, item_id)
+    return [
+        ser.email_message_out(m) for m in conversation.thread_for(db, row.id)
+    ]
+
+
+@messages_router.get("/{item_id}/attachments/{attachment_id}")
+def download_attachment(
+    item_id: str,
+    attachment_id: str,
+    request: Request,
+    db: DbDep,
+    admin: AdminDep,
+    settings: SettingsDep,
+) -> Response:
+    """
+    Download one attachment from a received reply.
+
+    AUTHENTICATED, and the signed URL is never disclosed. Resend issues a
+    temporary public download URL; redirecting the browser to it would mean
+    publishing an unauthenticated link to private mail, so the bytes are
+    fetched server-side and streamed back under this session instead.
+
+    Three checks stand between a request and the bytes:
+
+      1. The attachment id must belong to a message on THIS conversation.
+         Without that, an authenticated caller could walk ids and read
+         attachments from any other thread.
+      2. Resend's own metadata must pass the type allowlist and the size
+         cap — re-checked at download time rather than trusted from the row,
+         because the row records what the sender claimed.
+      3. The bytes are counted as they arrive and abandoned past the cap.
+    """
+    row = get_or_404(db, ContactMessage, item_id)
+
+    # Which inbound message on this conversation holds this attachment?
+    owner = None
+    for message in conversation.thread_for(db, row.id):
+        for item in message.attachments or []:
+            if isinstance(item, dict) and item.get("id") == attachment_id:
+                owner = message
+                break
+        if owner is not None:
+            break
+
+    if owner is None or not owner.resend_email_id:
+        # Same answer for "no such attachment" and "not on this thread":
+        # the difference would confirm that an id exists elsewhere.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "attachment_not_found"},
+        )
+
+    payload = inbound_email.download_attachment(
+        settings, owner.resend_email_id, attachment_id
+    )
+
+    audit.record(
+        db,
+        request,
+        action="contact.attachment.downloaded"
+        if payload
+        else "contact.attachment.refused",
+        actor_id=admin.id,
+        actor_email=admin.email,
+        target_type="contact_message",
+        target_id=str(row.id),
+        # No filename and no URL: an attachment name is sender-supplied
+        # content, and the audit log is not the place for it.
+        details={"attachment": attachment_id[:64]},
+    )
+    db.commit()
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "attachment_unavailable",
+                "message": (
+                    "That attachment could not be fetched. It may be too "
+                    "large, of a type that is not allowed, or expired."
+                ),
+            },
+        )
+
+    return Response(
+        content=payload.content,
+        media_type=payload.content_type,
+        headers={
+            # `attachment` so nothing from an inbound email is ever rendered
+            # in the admin's origin, whatever its declared type.
+            "Content-Disposition": (
+                f'attachment; filename="{payload.filename}"'
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@messages_router.post("/{item_id}/reply", response_model=s.ReplyResult)
+def reply_to_message(
+    item_id: str,
+    payload: s.ReplyIn,
+    request: Request,
+    db: DbDep,
+    admin: AdminDep,
+    settings: SettingsDep,
+) -> dict:
+    """
+    Reply to the visitor.
+
+    A failed send is NOT an error response. The reply is recorded either
+    way, and returning 500 would lose the operator's typed text and tell
+    them nothing useful. The result carries the status so the UI can say
+    what happened and offer the row for retry.
+
+    The only hard failure is email being unconfigured, which is a
+    deployment problem rather than something to retry.
+    """
+    row = get_or_404(db, ContactMessage, item_id)
+
+    if not settings.email_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "email_not_configured",
+                "message": (
+                    "No email is configured, so a reply cannot be sent. Set "
+                    "RESEND_API_KEY, EMAIL_FROM and ADMIN_EMAIL."
+                ),
+            },
+        )
+
+    sent, result = conversation.send_reply(
+        settings,
+        db,
+        contact_message_id=row.id,
+        body=payload.body,
+        admin_id=admin.id,
+    )
+
+    audit.record(
+        db,
+        request,
+        action="contact.reply.sent"
+        if result.ok
+        else "contact.reply.failed",
+        actor_id=admin.id,
+        actor_email=admin.email,
+        target_type="contact_message",
+        target_id=str(row.id),
+        # Status only. No addresses, no body, no key.
+        details={"status": result.status},
+    )
+    db.commit()
+
+    return {
+        "status": result.status,
+        "message": (
+            "Reply sent."
+            if result.ok
+            else f"The reply was saved but not delivered: {result.error}"
+        ),
+        "email": ser.email_message_out(sent) if sent else None,
+    }
 
 
 @messages_router.post("/{item_id}/resend", response_model=s.MessageOut)

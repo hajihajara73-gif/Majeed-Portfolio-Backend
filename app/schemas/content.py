@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -496,6 +496,68 @@ class MessagePage(BaseModel):
     limit: int
     offset: int
     counts: MessageCounts
+
+
+class EmailMessageOut(ORMModel):
+    """One message in a conversation, in either direction."""
+
+    id: str
+    contact_message_id: str
+    direction: str
+    from_email: str
+    to_email: str
+    subject: str | None
+    text_body: str
+    resend_email_id: str | None = None
+    message_id: str | None = None
+    delivery_status: str
+    delivery_error: str | None = None
+    sent_at: datetime | None = None
+    attempts: int = 0
+    created_at: datetime
+    # Attachment METADATA only — never bytes and never a download URL. The
+    # admin fetches the bytes through the authenticated endpoint.
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    # SPF/DKIM/DMARC as Resend evaluated them, so a reply that failed
+    # authentication is visibly suspect rather than silently trusted.
+    auth_results: dict[str, Any] | None = None
+    # html_body, in_reply_to and references are deliberately NOT exposed.
+    # The timeline renders the text part, the threading headers are plumbing
+    # the UI has no use for, and inbound HTML is never rendered at all.
+
+
+class ReplyIn(BaseModel):
+    """
+    The admin's reply.
+
+    Bounded for the same reason the public form is: an unbounded body is an
+    unbounded row and an unbounded email. 10,000 is roomy for a real reply
+    and still a limit.
+    """
+
+    body: str = Field(min_length=1, max_length=10_000)
+
+    @field_validator("body")
+    @classmethod
+    def _strip_control_chars(cls, value: str) -> str:
+        cleaned = value.replace("\r\n", "\n")
+        # Same treatment the public endpoint gives incoming text: control
+        # characters have no place in a message and are a header-injection
+        # vector once the value reaches an email.
+        stripped = "".join(
+            ch for ch in cleaned if ch in "\n\t" or ord(ch) >= 32
+        ).strip()
+        if not stripped:
+            raise ValueError("reply body cannot be empty")
+        return stripped
+
+
+class ReplyResult(BaseModel):
+    """What happened, plus the row so the timeline can update in place."""
+
+    status: str
+    message: str
+    email: EmailMessageOut | None = None
 
 
 class MessageUpdate(Versioned):

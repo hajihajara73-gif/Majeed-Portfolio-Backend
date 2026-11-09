@@ -18,6 +18,7 @@ from app.models.content import (
     CareerEntry,
     ContactMessage,
     EducationEntry,
+    EmailMessage,
     ExpertiseItem,
     HomeContent,
     MediaAsset,
@@ -290,4 +291,38 @@ def about_out(row: AboutContent) -> dict[str, Any]:
         "facts": row.facts,
         "portrait_media_id": _id(row.portrait_media_id),
         "updated_at": row.updated_at,
+    }
+
+
+def email_message_out(row: EmailMessage) -> dict[str, Any]:
+    """
+    One conversation message.
+
+    `html_body`, `in_reply_to` and `references` are withheld: the timeline
+    renders the text part, and the threading headers are plumbing the UI has
+    no use for. `delivery_error` IS included — a failure is only actionable
+    if you can see why, and this is an authenticated admin view.
+    """
+    return {
+        "id": str(row.id),
+        "contact_message_id": str(row.contact_message_id),
+        "direction": row.direction,
+        "from_email": row.from_email,
+        "to_email": row.to_email,
+        "subject": row.subject,
+        "text_body": row.text_body,
+        "resend_email_id": row.resend_email_id,
+        "message_id": row.message_id,
+        "delivery_status": row.delivery_status,
+        "delivery_error": row.delivery_error,
+        "sent_at": row.sent_at,
+        "attempts": row.attempts,
+        "created_at": row.created_at,
+        # Metadata only, and already sanitised at receive time. No download
+        # URL is ever serialised: the bytes come from the authenticated
+        # endpoint, which re-checks the rules against Resend directly.
+        "attachments": [
+            a for a in (row.attachments or []) if isinstance(a, dict)
+        ],
+        "auth_results": row.auth_results,
     }

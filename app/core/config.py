@@ -305,6 +305,53 @@ class Settings(BaseSettings):
 
     email_timeout_seconds: int = 10
 
+    # --- two-way conversation ------------------------------------------------
+    # Where a visitor's reply should go when the owner answers from the admin.
+    #
+    # UNSET (the default): Reply-To is ADMIN_EMAIL, so a reply lands in the
+    # owner's own inbox. That works today and needs no inbound setup.
+    #
+    # SET, e.g. reply@inbox.mohammedmajeedportfolio.me: Reply-To becomes this
+    # address, so replies come back through Resend Receiving and into the
+    # conversation timeline.
+    #
+    # The switch is deliberate rather than automatic. Pointing Reply-To at a
+    # domain that is not yet receiving mail would bounce every reply a visitor
+    # sends — so this stays empty until the MX records are live and verified.
+    # See docs/EMAIL.md.
+    contact_inbound_address: str | None = None
+
+    # Shared secret for the Resend webhook, from the Resend dashboard. Starts
+    # `whsec_`. SECRET: anyone holding it can forge an inbound email.
+    resend_webhook_secret: str | None = None
+
+    # A SEPARATE key with read access, used only to fetch inbound bodies.
+    #
+    # Deliberately not the same key as RESEND_API_KEY. That one is send-only,
+    # which is the right scope for sending and is worth keeping: if the
+    # sending key leaks, it cannot be used to read the mailbox. Splitting
+    # them keeps each blast radius as small as the job needs.
+    resend_read_api_key: str | None = None
+
+    # Largest attachment this will fetch from Resend. Inbound mail is
+    # attacker-controlled: without a ceiling, one message can exhaust memory
+    # or disk. 10 MB is generous for a real attachment and still a limit.
+    inbound_attachment_max_bytes: int = 10 * 1024 * 1024
+
+    @property
+    def inbound_read_key(self) -> str | None:
+        """The key used for reading inbound mail, never for sending."""
+        return self.resend_read_api_key
+
+    @property
+    def reply_to_address(self) -> str | None:
+        """Where a reply from the admin should be answered to."""
+        return self.contact_inbound_address or self.admin_email
+
+    @property
+    def inbound_configured(self) -> bool:
+        return bool(self.contact_inbound_address and self.resend_webhook_secret)
+
     @property
     def email_configured(self) -> bool:
         """True only when a send could actually succeed."""

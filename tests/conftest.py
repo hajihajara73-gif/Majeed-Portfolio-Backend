@@ -28,6 +28,20 @@ os.environ["EMAIL_FROM"] = ""
 os.environ["ADMIN_EMAIL"] = ""
 os.environ["SEND_VISITOR_CONFIRMATION"] = "false"
 
+# The same applies to the INBOUND credentials, for the same reason and with
+# the same failure mode. Once `.env` gained CONTACT_INBOUND_ADDRESS, the test
+# pinning "Reply-To falls back to the owner until inbound is configured"
+# started seeing the real inbound address and failing — the suite was reading
+# the machine's configuration instead of its own.
+#
+# Forced empty so every test starts from "inbound is off". The inbound tests
+# build their own Settings and override the dependency, so they exercise the
+# webhook and the fetch without a real key, a real secret or a real mailbox
+# anywhere near them.
+os.environ["CONTACT_INBOUND_ADDRESS"] = ""
+os.environ["RESEND_READ_API_KEY"] = ""
+os.environ["RESEND_WEBHOOK_SECRET"] = ""
+
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402

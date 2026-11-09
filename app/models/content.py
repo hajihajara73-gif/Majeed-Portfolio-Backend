@@ -615,6 +615,106 @@ class ContactMessage(UUIDPrimaryKey, Base):
     )
 
 
+class EmailMessage(UUIDPrimaryKey, Base):
+    """
+    One email in a conversation — in either direction.
+
+    A separate table rather than reply columns on `contact_messages`, because
+    a conversation is one-to-many: a visitor writes, the owner replies, the
+    visitor replies again. Columns on the parent could only ever hold the
+    first reply, and would have nowhere to put an inbound message at all.
+
+    `contact_messages` stays exactly as it was. It remains the record of the
+    original enquiry and its notification; this table is the thread hanging
+    off it. The parent's long-unused `replied_at` is finally populated when
+    the first outbound message is sent, rather than inventing a second field
+    that means the same thing.
+
+    THREADING. `message_id`, `in_reply_to` and `references` are the RFC 5322
+    headers, stored as sent or received. They are what lets Gmail and Outlook
+    group a reply with the original, and — once inbound is configured — what
+    lets an incoming reply be matched to its conversation by something
+    stronger than a subject line.
+    """
+
+    __tablename__ = "email_messages"
+
+    contact_message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("contact_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    # CASCADE on purpose: a thread has no meaning without the enquiry it
+    # belongs to, and deleting a message from the inbox should not leave
+    # orphaned replies behind.
+
+    # "inbound" = from the visitor, "outbound" = from the owner.
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    from_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    to_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Both kept. The text part is what gets indexed and shown in a plain
+    # timeline; the HTML part is what the recipient actually saw.
+    text_body: Mapped[str] = mapped_column(Text, nullable=False)
+    html_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Resend's id for an outbound send, or for a fetched inbound email.
+    # Also the duplicate guard on retry, exactly as on the parent.
+    resend_email_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # RFC 5322 threading headers. `references` is a space-separated list and
+    # can get long, so it is Text rather than a bounded String.
+    message_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    in_reply_to: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    references: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Same vocabulary as ContactMessage.email_delivery_status, deliberately:
+    # pending | sent | failed | disabled. Inbound rows are "received".
+    delivery_status: Mapped[str] = mapped_column(
+        String(16), default="pending", nullable=False
+    )
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Who sent it, for an outbound message. Null for inbound.
+    sent_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # --- inbound only --------------------------------------------------
+    # Attachment METADATA, never the bytes: a sanitised filename, the
+    # declared content type, the size, and Resend's id so the admin can
+    # fetch it on demand through an authenticated endpoint. Storing the
+    # bodies here would put attacker-supplied binaries in the database and
+    # a download URL within reach of anyone who could read a row.
+    attachments: Mapped[list | None] = mapped_column(JSONType, nullable=True)
+
+    # SPF/DKIM/DMARC as Resend evaluated them. Shown in the admin so a
+    # reply that failed authentication is visibly suspect rather than
+    # silently trusted. Never used to decide which conversation a message
+    # joins — that is what the threading headers are for.
+    auth_results: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+    __table_args__ = (
+        # The timeline query: every message for one enquiry, oldest first.
+        Index(
+            "ix_email_messages_contact_created",
+            "contact_message_id",
+            "created_at",
+        ),
+        # Matching an inbound reply to its thread, and the duplicate check
+        # that stops one webhook being processed twice.
+        Index("ix_email_messages_message_id", "message_id"),
+        Index("ix_email_messages_resend_email_id", "resend_email_id"),
+        CheckConstraint(
+            "direction in ('inbound','outbound')", name="email_direction_valid"
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Publishing
 # ---------------------------------------------------------------------------

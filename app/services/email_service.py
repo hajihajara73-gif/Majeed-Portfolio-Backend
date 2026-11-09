@@ -27,6 +27,7 @@ never written to a log.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from html import escape
@@ -226,6 +227,7 @@ def _send(
     html: str,
     text: str | None = None,
     reply_to: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> EmailResult:
     """
     One Resend call. Never raises.
@@ -257,6 +259,10 @@ def _send(
         params["text"] = text
     if reply_to:
         params["reply_to"] = [reply_to]
+    if headers:
+        # RFC threading headers. Resend passes these through
+        # verbatim, which is what makes client-side threading work.
+        params["headers"] = headers
 
     try:
         sent = resend.Emails.send(params)  # type: ignore[arg-type]
@@ -325,4 +331,110 @@ def send_confirmation(
             "I will get back to you soon.\n\n"
             "This is an automated acknowledgement."
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Replies
+# ---------------------------------------------------------------------------
+
+
+def new_message_id(domain: str) -> str:
+    """
+    A fresh RFC 5322 Message-ID.
+
+    Angle brackets included, because that is how the header is written and
+    how In-Reply-To and References must quote it. The domain part should be
+    one we control so the id is globally unique in practice.
+    """
+    return f"<{uuid.uuid4()}@{domain}>"
+
+
+def reply_html(*, body: str, original_subject: str | None,
+               original_body: str, visitor_name: str) -> str:
+    """
+    The owner's reply, as the visitor sees it.
+
+    The reply itself comes first and the quoted original follows, which is
+    the convention every mail client uses and the order a reader expects.
+
+    `body` is the owner's own text, but it is escaped exactly as rigorously
+    as the visitor's: an admin pasting a snippet containing `<` should see
+    `<`, not a broken email.
+    """
+    quoted = escape(original_body).replace("\n", "<br>")
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:24px 12px;background:#f4f1ea;
+ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,
+ Helvetica,Arial,sans-serif">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"
+ style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;
+ border:1px solid #e3ddd1">
+  <tr><td style="padding:28px 28px 8px">
+    <div style="color:#1c1a16;font-size:15px;line-height:1.65">{
+        escape(body).replace(chr(10), "<br>")
+    }</div>
+  </td></tr>
+  <tr><td style="padding:20px 28px 28px">
+    <div style="border-top:1px solid #ece5d8;padding-top:14px">
+      <p style="margin:0 0 8px;color:#6b6558;font-size:12px">
+        On your message{
+            " &ldquo;" + escape(original_subject) + "&rdquo;"
+            if original_subject
+            else ""
+        }, {escape(visitor_name)} wrote:</p>
+      <div style="border-left:3px solid #e3ddd1;padding-left:12px;
+       color:#6b6558;font-size:13px;line-height:1.6">{quoted}</div>
+    </div>
+  </td></tr>
+</table></body></html>"""
+
+
+def send_reply(
+    settings: Settings,
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    original_subject: str | None,
+    original_body: str,
+    visitor_name: str,
+    message_id: str,
+    in_reply_to: str | None,
+    references: str | None,
+) -> EmailResult:
+    """
+    Send the owner's reply to the visitor.
+
+    THREADING. `Message-ID`, `In-Reply-To` and `References` are set
+    explicitly so Gmail and Outlook group the reply with whatever the visitor
+    already has. Resend accepts arbitrary headers, which is what makes this
+    possible at all.
+
+    REPLY-TO. Never the verified sending address — that would send the
+    visitor's answer into a mailbox nobody reads. It is `reply_to_address`,
+    which is the owner's inbox until an inbound domain is configured and the
+    conversation address after. See `Settings.contact_inbound_address`.
+    """
+    headers: dict[str, str] = {"Message-ID": message_id}
+    if in_reply_to:
+        headers["In-Reply-To"] = in_reply_to
+    if references:
+        headers["References"] = references
+
+    return _send(
+        settings,
+        to=to_email,
+        subject=subject,
+        html=reply_html(
+            body=body,
+            original_subject=original_subject,
+            original_body=original_body,
+            visitor_name=visitor_name,
+        ),
+        text=body,
+        reply_to=settings.reply_to_address,
+        headers=headers,
     )

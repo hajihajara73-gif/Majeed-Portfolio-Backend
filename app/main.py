@@ -10,7 +10,7 @@ from app.api.admin import dashboard as admin_dashboard
 from app.api.admin import files as admin_files
 from app.api.admin import media as admin_media
 from app.api.admin import publish as admin_publish
-from app.api.routes import auth, health, public
+from app.api.routes import auth, health, public, webhooks
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -126,8 +126,11 @@ app.include_router(health.root_router)
 app.include_router(health.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 
-# The only unauthenticated router. Its abuse controls live in the module.
+# The only unauthenticated routers. Their abuse controls live in the modules:
+# the contact form rate-limits, and the webhook demands a valid signature
+# before it will look at a body.
 app.include_router(public.router, prefix=settings.api_prefix)
+app.include_router(webhooks.router, prefix=settings.api_prefix)
 
 # Admin CMS. Every one of these routers depends on AdminDep, so authorisation
 # is enforced server-side on every request.
