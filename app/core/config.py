@@ -264,6 +264,65 @@ class Settings(BaseSettings):
     deploy_hook_url: str | None = None
     deploy_hook_timeout_seconds: int = 10
 
+    # --- contact notification email -----------------------------------------
+    # Resend delivers the notification sent when someone uses the public
+    # contact form. Every value is optional and the whole feature is inert
+    # without them: a message is still saved and still appears in the admin,
+    # it simply does not also arrive by email. That ordering is deliberate —
+    # see app/services/email_service.py.
+    #
+    # TREAT THE API KEY AS A SECRET. It can send mail as your domain. It is
+    # never returned by the API and never written to a log.
+    resend_api_key: str | None = None
+
+    # The From header, verbatim. Either form works:
+    #
+    #   EMAIL_FROM=Majeed <contact@mail.mohammedmajeedportfolio.me>
+    #   EMAIL_FROM=contact@mail.mohammedmajeedportfolio.me
+    #
+    # The address MUST be on a domain verified in Resend or the send is
+    # rejected outright. It is never the visitor's address: sending as
+    # someone else's domain is what SPF and DMARC exist to stop, and it is
+    # why the visitor goes in Reply-To instead.
+    email_from: str | None = None
+
+    # Where notifications land — the owner's inbox.
+    #
+    # NOT the same thing as an admin USER account. Nobody signs in with this;
+    # it is purely a destination address. Admin accounts live in the
+    # `admin_users` table and are managed with `python -m app.cli`.
+    admin_email: str | None = None
+
+    # Linked from the notification so a message can be opened in the admin.
+    # Falls back to no link rather than guessing a domain, for the same reason
+    # the site URL is never hard-coded.
+    admin_dashboard_url: str | None = None
+
+    # Send the visitor an acknowledgement as well as notifying the owner.
+    # Off by default: it doubles the send volume and is the kind of thing that
+    # should be switched on deliberately.
+    send_visitor_confirmation: bool = False
+
+    email_timeout_seconds: int = 10
+
+    @property
+    def email_configured(self) -> bool:
+        """True only when a send could actually succeed."""
+        return bool(self.resend_api_key and self.email_from and self.admin_email)
+
+    @property
+    def email_from_header(self) -> str:
+        """
+        `EMAIL_FROM` with anything that could inject a header removed.
+
+        CR, LF and NUL terminate or split a header, so a value carrying them
+        could append `Bcc:` to the message. This is configuration rather than
+        user input, but a From header is assembled from a string either way
+        and the cost of being certain is one line.
+        """
+        raw = self.email_from or ""
+        return "".join(ch for ch in raw if ch not in "\r\n\0").strip()
+
     # --- request limits -----------------------------------------------------
     # Hard ceiling on any request body, enforced before the body is buffered.
     # The public contact endpoint is reachable by anyone, so without this an

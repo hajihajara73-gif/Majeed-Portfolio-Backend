@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import (
     ORMModel,
@@ -461,6 +461,41 @@ class MessageOut(ORMModel):
     is_spam: bool
     replied_at: datetime | None
     created_at: datetime
+    updated_at: datetime | None = None
+
+    # Delivery of the owner's notification. `email_error` is Resend's own
+    # message, which is safe to show an authenticated admin and is the only
+    # thing that makes a failure actionable. The API key never appears in it
+    # — see email_service, which records `str(error)` only.
+    email_delivery_status: str = "disabled"
+    resend_email_id: str | None = None
+    email_error: str | None = None
+    email_sent_at: datetime | None = None
+    email_attempts: int = 0
+
+
+class MessageCounts(BaseModel):
+    total: int
+    unread: int
+    read: int
+    archived: int
+    email_failed: int
+
+
+class MessagePage(BaseModel):
+    """
+    A page of messages plus the inbox counters.
+
+    One response rather than a list and a separate counts call: the admin
+    renders both together, and two requests could disagree if a message
+    arrived between them.
+    """
+
+    items: list[MessageOut]
+    total: int
+    limit: int
+    offset: int
+    counts: MessageCounts
 
 
 class MessageUpdate(Versioned):

@@ -150,6 +150,7 @@ Full procedure, environment variables, DNS and smoke tests:
 | `docs/SECURITY.md` | Operational security posture, what was verified against the live API, open findings |
 | `docs/BACKUP-AND-RECOVERY.md` | What holds state, how to back it up, how to restore it |
 | `docs/SEO.md` | The public site's metadata, for context |
+| `docs/EMAIL.md` | Contact-form notification email: Resend setup, delivery states and retry |
 | `docs/SEO-AUDIT.md` | Technical SEO audit of the live site, for context |
 | `docs/SEO-KEYWORD-STRATEGY.md` | Keyword strategy, for context |
 | `docs/GOOGLE-SEARCH-CONSOLE-SETUP.md` | Search Console setup and DNS verification |

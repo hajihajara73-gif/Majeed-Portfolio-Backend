@@ -230,6 +230,14 @@ def message_out(row: ContactMessage) -> dict[str, Any]:
         "is_spam": row.is_spam,
         "replied_at": row.replied_at,
         "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        # Deliberately NOT exposed: ip_address and user_agent. They are kept
+        # for rate limiting and are of no use in the inbox.
+        "email_delivery_status": row.email_delivery_status,
+        "resend_email_id": row.resend_email_id,
+        "email_error": row.email_error,
+        "email_sent_at": row.email_sent_at,
+        "email_attempts": row.email_attempts,
     }
 
 

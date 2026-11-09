@@ -130,7 +130,17 @@ def test_message_reaches_the_admin_inbox(client: TestClient, admin) -> None:
     inbox = client.get("/api/admin/messages")
     assert inbox.status_code == 200
 
+    # The listing is a page object — items plus the inbox counters — so that
+    # the admin can render the list and its totals from one response.
     body = inbox.json()
-    assert len(body) == 1
-    assert body[0]["email"] == "visitor@example.com"
-    assert body[0]["is_read"] is False
+    assert body["total"] == 1
+    assert body["counts"]["unread"] == 1
+    assert body["counts"]["read"] == 0
+
+    items = body["items"]
+    assert len(items) == 1
+    assert items[0]["email"] == "visitor@example.com"
+    assert items[0]["is_read"] is False
+    # No mail is configured in the test environment, so nothing was attempted
+    # — and that is a recorded state, not a failure.
+    assert items[0]["email_delivery_status"] == "disabled"

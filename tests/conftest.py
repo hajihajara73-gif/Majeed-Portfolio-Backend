@@ -11,6 +11,23 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost/test")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-at-least-32-characters-long")
 
+# THE SUITE MUST NEVER BE ABLE TO SEND REAL EMAIL.
+#
+# `.env` holds a working Resend key on any machine where mail is set up, and
+# pydantic-settings reads that file. Without this the suite picks the key up
+# and starts making real API calls — which it did, and which showed up as
+# tests expecting "disabled" getting "failed" instead. One of them had
+# genuinely tried to send.
+#
+# Assigned, not `setdefault`: an environment variable overrides the `.env`
+# file, and forcing them empty is the whole point. Tests that need mail
+# switched on build their own Settings and override the dependency, so they
+# exercise the code without ever reaching the network.
+os.environ["RESEND_API_KEY"] = ""
+os.environ["EMAIL_FROM"] = ""
+os.environ["ADMIN_EMAIL"] = ""
+os.environ["SEND_VISITOR_CONFIRMATION"] = "false"
+
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402

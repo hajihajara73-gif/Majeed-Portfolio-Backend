@@ -580,11 +580,38 @@ class ContactMessage(UUIDPrimaryKey, Base):
     is_spam: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     replied_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
 
+    # --- notification delivery ---------------------------------------------
+    # Whether the owner was emailed about this message, and what Resend said.
+    # Kept on the message rather than in a separate table because it is a
+    # property OF the message: one message, one notification, and the admin
+    # needs to see at a glance whether it was delivered.
+    #
+    #   pending  — saved, not yet attempted (the state between commit and the
+    #              background send, and where a message sits if the process
+    #              dies in between: visible, and retryable)
+    #   sent     — Resend accepted it and returned an id
+    #   failed   — Resend refused or was unreachable; `email_error` says why
+    #   disabled — no email configured, so nothing was attempted
+    email_delivery_status: Mapped[str] = mapped_column(
+        String(16), default="pending", nullable=False
+    )
+    # Resend's id for the notification. Also the duplicate guard: a retry
+    # refuses to run when this is already set, so a double-click cannot send
+    # the same notification twice.
+    resend_email_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    email_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email_sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    email_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
 
     __table_args__ = (
         Index("ix_contact_messages_created_at", "created_at"),
         Index("ix_contact_messages_is_read", "is_read"),
+        # The admin lists failed notifications to retry them, and that filter
+        # would otherwise scan the whole table.
+        Index("ix_contact_messages_email_delivery_status", "email_delivery_status"),
     )
 
 

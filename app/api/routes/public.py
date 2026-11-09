@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 
@@ -19,6 +19,7 @@ from app.api.deps import DbDep, SettingsDep
 from app.core import audit
 from app.models.base import utcnow
 from app.models.content import ContactMessage
+from app.services import contact_notifier
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -75,6 +76,7 @@ def _count_since(db, ip: str | None, since) -> int:
 def submit_contact(
     payload: ContactRequest,
     request: Request,
+    background: BackgroundTasks,
     db: DbDep,
     settings: SettingsDep,
 ) -> ContactResponse:
@@ -101,20 +103,38 @@ def submit_contact(
             headers={"Retry-After": "3600"},
         )
 
-    db.add(
-        ContactMessage(
-            name=payload.name,
-            email=str(payload.email),
-            subject=payload.subject,
-            body=payload.message,
-            ip_address=ip,
-            user_agent=audit.user_agent(request),
-            created_at=now,
-        )
+    row = ContactMessage(
+        name=payload.name,
+        email=str(payload.email),
+        subject=payload.subject,
+        body=payload.message,
+        ip_address=ip,
+        user_agent=audit.user_agent(request),
+        created_at=now,
+        # "pending" until the background task reports back. If the process
+        # dies in between, the message is still saved and still shows as
+        # pending in the admin, where it can be retried — which is the whole
+        # reason the status is stored rather than inferred.
+        email_delivery_status=(
+            "pending" if settings.email_configured else "disabled"
+        ),
     )
+    db.add(row)
     # Not written to the audit log: that log is for admin actions, and filling
     # it from an unauthenticated endpoint would let anyone flood it.
     db.commit()
+    db.refresh(row)
+
+    # COMMITTED FIRST, EMAILED SECOND, and the send runs after the response.
+    #
+    # The message is safe at this point. Sending inline would make the
+    # visitor wait on Resend and would turn a Resend outage into a failed
+    # submission — losing a message because a third party is down is the one
+    # outcome this endpoint must never produce. The task records its own
+    # outcome against the row, so a failure is visible and retryable instead
+    # of silent.
+    if settings.email_configured:
+        background.add_task(contact_notifier.notify, settings, row.id)
 
     return ContactResponse(
         received=True, message="Thanks — your message has been sent."
